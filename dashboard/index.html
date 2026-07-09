@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex" />
+<title>Prowl — Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Inter:wght@400;500;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<!-- ── Login ─────────────────────────────────────────────── -->
+<section id="login-view" class="hidden">
+  <form id="login-form" class="login-card">
+    <div class="wordmark">prowl</div>
+    <p class="login-sub">admin dashboard</p>
+    <input id="login-email" type="email" placeholder="Email" autocomplete="username" required />
+    <input id="login-password" type="password" placeholder="Password" autocomplete="current-password" required />
+    <button type="submit" id="login-btn">Sign in</button>
+    <p id="login-error" class="error hidden"></p>
+  </form>
+</section>
+
+<!-- ── App ───────────────────────────────────────────────── -->
+<main id="app-view" class="hidden">
+  <header class="topbar">
+    <div class="wordmark small">prowl</div>
+    <nav>
+      <button class="tab active" data-tab="pets">Pets</button>
+      <button class="tab" data-tab="map">Map</button>
+    </nav>
+    <button id="signout-btn" class="ghost">Sign out</button>
+  </header>
+
+  <section class="stats" id="stats">
+    <div class="stat-card"><span class="stat-num" id="stat-total">–</span><span class="stat-label">pets</span></div>
+    <div class="stat-card"><span class="stat-num rose" id="stat-adoptable">–</span><span class="stat-label">adoptable</span></div>
+    <div class="stat-card"><span class="stat-num amber" id="stat-adopted">–</span><span class="stat-label">adopted</span></div>
+    <div class="stat-card"><span class="stat-num" id="stat-sightings">–</span><span class="stat-label">sightings · 7d</span></div>
+  </section>
+
+  <!-- Pets tab -->
+  <section id="tab-pets">
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th></th><th>Name</th><th>Species</th><th>Status</th>
+            <th>Adoption contact</th><th>Sightings</th><th>Last seen</th><th></th>
+          </tr>
+        </thead>
+        <tbody id="pets-tbody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- Map tab -->
+  <section id="tab-map" class="hidden">
+    <div id="map"></div>
+  </section>
+</main>
+
+<!-- Sightings modal -->
+<div id="modal-backdrop" class="hidden">
+  <div class="modal">
+    <div class="modal-head">
+      <h2 id="modal-title">Sightings</h2>
+      <button id="modal-close" class="ghost">✕</button>
+    </div>
+    <div id="modal-body"></div>
+  </div>
+</div>
+
+<div id="toast" class="hidden"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
