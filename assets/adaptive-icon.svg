@@ -1,0 +1,31 @@
+<svg width="1024" height="1024" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- No background — Android provides its own shape mask -->
+  <!-- Sonar rings -->
+  <circle cx="64" cy="66" r="57" fill="none" stroke="#F5B93E" stroke-width="1"    opacity="0.12"/>
+  <circle cx="64" cy="66" r="46" fill="none" stroke="#F5B93E" stroke-width="1.25" opacity="0.24"/>
+  <circle cx="64" cy="66" r="35" fill="none" stroke="#F5B93E" stroke-width="1.5"  opacity="0.42"/>
+  <circle cx="64" cy="66" r="24" fill="none" stroke="#F5B93E" stroke-width="2"    opacity="0.65"/>
+  <!-- Cat: left ear outer -->
+  <polygon points="42,56 48,28 60,52" fill="#F5B93E"/>
+  <!-- Cat: left ear inner -->
+  <polygon points="45,55 49,33 58,52" fill="#0D0E18"/>
+  <!-- Cat: right ear outer -->
+  <polygon points="68,52 80,28 86,56" fill="#F5B93E"/>
+  <!-- Cat: right ear inner -->
+  <polygon points="70,52 79,33 83,55" fill="#0D0E18"/>
+  <!-- Cat: head -->
+  <circle cx="64" cy="66" r="20" fill="#F5B93E"/>
+  <!-- Left eye -->
+  <ellipse cx="57" cy="64" rx="3" ry="5" fill="#0D0E18"/>
+  <!-- Right eye -->
+  <ellipse cx="71" cy="64" rx="3" ry="5" fill="#0D0E18"/>
+  <!-- Nose -->
+  <polygon points="64,71 61,75 67,75" fill="#C9883A"/>
+  <!-- Mouth -->
+  <path d="M61,75 Q64,78 67,75" fill="none" stroke="#C9883A" stroke-width="1.2" stroke-linecap="round"/>
+  <!-- Whisker dots -->
+  <circle cx="48" cy="68" r="1.4" fill="#C9883A" opacity="0.65"/>
+  <circle cx="44" cy="71" r="1.4" fill="#C9883A" opacity="0.65"/>
+  <circle cx="80" cy="68" r="1.4" fill="#C9883A" opacity="0.65"/>
+  <circle cx="84" cy="71" r="1.4" fill="#C9883A" opacity="0.65"/>
+</svg>

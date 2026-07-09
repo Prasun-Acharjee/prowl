@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Prowl — Icon Concepts</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #0D0E18;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    padding: 52px 44px;
+    min-height: 100vh;
+  }
+  .page-header { margin-bottom: 52px; }
+  .page-header .eyebrow {
+    font-size: 11px; letter-spacing: 5px; text-transform: uppercase;
+    color: #555670; margin-bottom: 10px;
+  }
+  .page-header h1 { font-size: 30px; font-weight: 700; color: #F0EDE8; }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 20px;
+  }
+
+  .card {
+    background: #161824;
+    border: 1px solid #2A2C3D;
+    border-radius: 24px;
+    padding: 28px;
+  }
+
+  .previews {
+    display: flex;
+    align-items: flex-end;
+    gap: 18px;
+    padding-bottom: 24px;
+    margin-bottom: 20px;
+    border-bottom: 1px solid #2A2C3D;
+  }
+  .preview-item { display: flex; flex-direction: column; align-items: center; gap: 7px; }
+  .size-tag { font-size: 10px; color: #555670; letter-spacing: 1px; }
+
+  .concept-tag {
+    font-size: 10px; letter-spacing: 3px; text-transform: uppercase;
+    color: rgba(245,185,62,0.55); margin-bottom: 5px;
+  }
+  .concept-name { font-size: 18px; font-weight: 600; color: #F0EDE8; margin-bottom: 6px; }
+  .concept-desc { font-size: 13px; color: #9B9AAD; line-height: 1.65; }
+</style>
+</head>
+<body>
+
+<div class="page-header">
+  <p class="eyebrow">Prowl · Brand</p>
+  <h1>Icon Concepts</h1>
+</div>
+
+<div class="grid">
+
+  <!-- ── A: Pin-Cat ────────────────────────────────── -->
+  <div class="card">
+    <div class="previews">
+      <div class="preview-item">
+        <svg width="96" height="96" viewBox="0 0 96 96" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect width="96" height="96" rx="22" fill="#F5B93E"/>
+          <!-- left ear -->
+          <polygon points="18,38 28,8 44,34" fill="#0D0E18"/>
+          <!-- right ear -->
+          <polygon points="78,38 68,8 52,34" fill="#0D0E18"/>
+          <!-- head circle -->
+          <circle cx="48" cy="46" r="27" fill="#0D0E18"/>
+          <!-- pin stem -->
+          <polygon points="34,68 48,90 62,68" fill="#0D0E18"/>
+          <!-- left eye (amber slit) -->
+          <ellipse cx="38" cy="46" rx="4" ry="6" fill="#F5B93E"/>
+          <!-- right eye (amber slit) -->
+          <ellipse cx="58" cy="46" rx="4" ry="6" fill="#F5B93E"/>
+          <!-- nose -->
+          <polygon points="48,55 44,60 52,60" fill="#F5B93E"/>
+        </svg>
+        <span class="size-tag">96px</span>
+      </div>
+      <div class="preview-item">
+        <svg width="60" height="60" viewBox="0 0 96 96" fill="none">
+          <rect width="96" height="96" rx="22" fill="#F5B93E"/>
+          <polygon points="18,38 28,8 44,34" fill="#0D0E18"/>
+          <polygon points="78,38 68,8 52,34" fill="#0D0E18"/>
+          <circle cx="48" cy="46" r="27" fill="#0D0E18"/>
+          <polygon points="34,68 48,90 62,68" fill="#0D0E18"/>
+          <ellipse cx="38" cy="46" rx="4" ry="6" fill="#F5B93E"/>
+          <ellipse cx="58" cy="46" rx="4" ry="6" fill="#F5B93E"/>
+          <polygon points="48,55 44,60 52,60" fill="#F5B93E"/>
+        </svg>
+        <span class="size-tag">60px</span>
+      </div>
+      <div class="preview-item">
+        <svg width="36" height="36" viewBox="0 0 96 96" fill="none">
+          <rect width="96" height="96" rx="22" fill="#F5B93E"/>
+          <polygon points="18,38 28,8 44,34" fill="#0D0E18"/>
+          <polygon points="78,38 68,8 52,34" fill="#0D0E18"/>
+          <circle cx="48" cy="46" r="27" fill="#0D0E18"/>
+          <polygon points="34,68 48,90 62,68" fill="#0D0E18"/>
+          <ellipse cx="38" cy="46" rx="4" ry="6" fill="#F5B93E"/>
+          <ellipse cx="58" cy="46" rx="4" ry="6" fill="#F5B93E"/>
+        </svg>
+        <span class="size-tag">36px</span>
+      </div>
+    </div>
+    <p class="concept-tag">Concept A</p>
+    <p class="concept-name">Pin-Cat</p>
+    <p class="concept-desc">The map pin wears cat ears. A single shape that tells the whole story — finding cats on a map. Amber background pops on any home screen.</p>
+  </div>
+
+  <!-- ── B: Cat Eye ────────────────────────────────── -->
+  <div class="card">
+    <div class="previews">
+      <div class="preview-item">
+        <svg width="96" height="96" viewBox="0 0 96 96" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect width="96" height="96" rx="22" fill="#161824"/>
+          <!-- outer eye glow ring -->
+          <ellipse cx="48" cy="48" rx="40" ry="22" fill="none" stroke="#F5B93E" stroke-width="1.5" opacity="0.25"/>
+          <!-- white of eye -->
+          <path d="M8,48 Q48,10 88,48 Q48,86 8,48 Z" fill="#F0EDE8"/>
+          <!-- iris amber -->
+          <ellipse cx="48" cy="48" rx="18" ry="18" fill="#C9883A"/>
+          <!-- inner iris detail -->
+          <ellipse cx="48" cy="48" rx="14" ry="14" fill="#F5B93E"/>
+          <!-- pupil slit -->
+          <ellipse cx="48" cy="48" rx="5" ry="15" fill="#0D0E18"/>
+          <!-- highlight -->
+          <ellipse cx="43" cy="42" rx="3" ry="2" fill="white" opacity="0.7"/>
+          <!-- eyelid lines -->
+          <path d="M8,48 Q48,10 88,48" fill="none" stroke="#0D0E18" stroke-width="1.5" opacity="0.3"/>
+        </svg>
+        <span class="size-tag">96px</span>
+      </div>
+      <div class="preview-item">
+        <svg width="60" height="60" viewBox="0 0 96 96" fill="none">
+          <rect width="96" height="96" rx="22" fill="#161824"/>
+          <path d="M8,48 Q48,10 88,48 Q48,86 8,48 Z" fill="#F0EDE8"/>
+          <ellipse cx="48" cy="48" rx="18" ry="18" fill="#C9883A"/>
+          <ellipse cx="48" cy="48" rx="14" ry="14" fill="#F5B93E"/>
+          <ellipse cx="48" cy="48" rx="5" ry="15" fill="#0D0E18"/>
+          <ellipse cx="43" cy="42" rx="3" ry="2" fill="white" opacity="0.7"/>
+        </svg>
+        <span class="size-tag">60px</span>
+      </div>
+      <div class="preview-item">
+        <svg width="36" height="36" viewBox="0 0 96 96" fill="none">
+          <rect width="96" height="96" rx="22" fill="#161824"/>
+          <path d="M8,48 Q48,10 88,48 Q48,86 8,48 Z" fill="#F0EDE8"/>
+          <ellipse cx="48" cy="48" rx="18" ry="18" fill="#C9883A"/>
+          <ellipse cx="48" cy="48" rx="14" ry="14" fill="#F5B93E"/>
+          <ellipse cx="48" cy="48" rx="5" ry="15" fill="#0D0E18"/>
+        </svg>
+        <span class="size-tag">36px</span>
+      </div>
+    </div>
+    <p class="concept-tag">Concept B</p>
+    <p class="concept-name">Cat Eye</p>
+    <p class="concept-desc">A cat's eye with vertical slit pupil in amber. Mysterious, distinctive, and holds up at every size. The eye also reads as a viewfinder — a nod to the camera feature.</p>
+  </div>
+
+  <!-- ── C: Sonar ──────────────────────────────────── -->
+  <div class="card">
+    <div class="previews">
+      <div class="preview-item">
+        <svg width="96" height="96" viewBox="0 0 96 96" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect width="96" height="96" rx="22" fill="#0D0E18"/>
+          <!-- sonar rings -->
+          <circle cx="48" cy="52" r="38" fill="none" stroke="#F5B93E" stroke-width="1.5" opacity="0.18"/>
+          <circle cx="48" cy="52" r="28" fill="none" stroke="#F5B93E" stroke-width="1.5" opacity="0.35"/>
+          <circle cx="48" cy="52" r="17" fill="none" stroke="#F5B93E" stroke-width="1.5" opacity="0.6"/>
+          <!-- center dot -->
+          <circle cx="48" cy="52" r="6" fill="#F5B93E"/>
+          <!-- cat ears on center -->
+          <polygon points="40,40 44,30 50,40" fill="#F5B93E"/>
+          <polygon points="46,40 52,30 58,40" fill="#F5B93E"/>
+          <!-- cat head circle (covers base of ears) -->
+          <circle cx="48" cy="46" r="9" fill="#F5B93E"/>
+          <!-- eye slits -->
+          <ellipse cx="44" cy="46" rx="2" ry="3" fill="#0D0E18"/>
+          <ellipse cx="52" cy="46" rx="2" ry="3" fill="#0D0E18"/>
+          <!-- ping dot off-center suggesting a found cat -->
+          <circle cx="68" cy="34" r="4" fill="#F5B93E" opacity="0.8"/>
+          <circle cx="68" cy="34" r="8" fill="none" stroke="#F5B93E" stroke-width="1" opacity="0.3"/>
+        </svg>
+        <span class="size-tag">96px</span>
+      </div>
+      <div class="preview-item">
+        <svg width="60" height="60" viewBox="0 0 96 96" fill="none">
+          <rect width="96" height="96" rx="22" fill="#0D0E18"/>
+          <circle cx="48" cy="52" r="38" fill="none" stroke="#F5B93E" stroke-width="1.5" opacity="0.18"/>
+          <circle cx="48" cy="52" r="28" fill="none" stroke="#F5B93E" stroke-width="1.5" opacity="0.35"/>
+          <circle cx="48" cy="52" r="17" fill="none" stroke="#F5B93E" stroke-width="1.5" opacity="0.6"/>
+          <circle cx="48" cy="52" r="6" fill="#F5B93E"/>
+          <polygon points="40,40 44,30 50,40" fill="#F5B93E"/>
+          <polygon points="46,40 52,30 58,40" fill="#F5B93E"/>
+          <circle cx="48" cy="46" r="9" fill="#F5B93E"/>
+          <ellipse cx="44" cy="46" rx="2" ry="3" fill="#0D0E18"/>
+          <ellipse cx="52" cy="46" rx="2" ry="3" fill="#0D0E18"/>
+          <circle cx="68" cy="34" r="4" fill="#F5B93E" opacity="0.8"/>
+        </svg>
+        <span class="size-tag">60px</span>
+      </div>
+      <div class="preview-item">
+        <svg width="36" height="36" viewBox="0 0 96 96" fill="none">
+          <rect width="96" height="96" rx="22" fill="#0D0E18"/>
+          <circle cx="48" cy="52" r="38" fill="none" stroke="#F5B93E" stroke-width="2" opacity="0.2"/>
+          <circle cx="48" cy="52" r="27" fill="none" stroke="#F5B93E" stroke-width="2" opacity="0.4"/>
+          <circle cx="48" cy="52" r="15" fill="none" stroke="#F5B93E" stroke-width="2" opacity="0.65"/>
+          <polygon points="40,40 44,30 50,40" fill="#F5B93E"/>
+          <polygon points="46,40 52,30 58,40" fill="#F5B93E"/>
+          <circle cx="48" cy="46" r="9" fill="#F5B93E"/>
+        </svg>
+        <span class="size-tag">36px</span>
+      </div>
+    </div>
+    <p class="concept-tag">Concept C</p>
+    <p class="concept-name">Sonar</p>
+    <p class="concept-desc">Concentric radar rings radiating from a cat at the centre. Directly represents the "cats nearby" feature. The ping dot suggests a cat has been found.</p>
+  </div>
+
+  <!-- ── D: Paw Print ──────────────────────────────── -->
+  <div class="card">
+    <div class="previews">
+      <div class="preview-item">
+        <svg width="96" height="96" viewBox="0 0 96 96" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect width="96" height="96" rx="22" fill="#161824"/>
+          <!-- main pad -->
+          <ellipse cx="48" cy="58" rx="20" ry="16" fill="#F5B93E"/>
+          <!-- toe pads -->
+          <ellipse cx="26" cy="40" rx="9" ry="7" fill="#F5B93E"/>
+          <ellipse cx="40" cy="30" rx="9" ry="7" fill="#F5B93E"/>
+          <ellipse cx="56" cy="30" rx="9" ry="7" fill="#F5B93E"/>
+          <ellipse cx="70" cy="40" rx="9" ry="7" fill="#F5B93E"/>
+          <!-- subtle inner detail on main pad -->
+          <ellipse cx="42" cy="56" rx="5" ry="4" fill="#C9883A" opacity="0.5"/>
+          <ellipse cx="54" cy="56" rx="5" ry="4" fill="#C9883A" opacity="0.5"/>
+        </svg>
+        <span class="size-tag">96px</span>
+      </div>
+      <div class="preview-item">
+        <svg width="60" height="60" viewBox="0 0 96 96" fill="none">
+          <rect width="96" height="96" rx="22" fill="#161824"/>
+          <ellipse cx="48" cy="58" rx="20" ry="16" fill="#F5B93E"/>
+          <ellipse cx="26" cy="40" rx="9" ry="7" fill="#F5B93E"/>
+          <ellipse cx="40" cy="30" rx="9" ry="7" fill="#F5B93E"/>
+          <ellipse cx="56" cy="30" rx="9" ry="7" fill="#F5B93E"/>
+          <ellipse cx="70" cy="40" rx="9" ry="7" fill="#F5B93E"/>
+        </svg>
+        <span class="size-tag">60px</span>
+      </div>
+      <div class="preview-item">
+        <svg width="36" height="36" viewBox="0 0 96 96" fill="none">
+          <rect width="96" height="96" rx="22" fill="#161824"/>
+          <ellipse cx="48" cy="58" rx="20" ry="16" fill="#F5B93E"/>
+          <ellipse cx="26" cy="40" rx="9" ry="7" fill="#F5B93E"/>
+          <ellipse cx="40" cy="30" rx="9" ry="7" fill="#F5B93E"/>
+          <ellipse cx="56" cy="30" rx="9" ry="7" fill="#F5B93E"/>
+          <ellipse cx="70" cy="40" rx="9" ry="7" fill="#F5B93E"/>
+        </svg>
+        <span class="size-tag">36px</span>
+      </div>
+    </div>
+    <p class="concept-tag">Concept D</p>
+    <p class="concept-name">Paw</p>
+    <p class="concept-desc">Classic paw print in the app's amber. The most universally readable pet symbol — anyone sees it and knows what the app is about. Stays clear at every size.</p>
+  </div>
+
+  <!-- ── E: Crescent Cat ───────────────────────────── -->
+  <div class="card">
+    <div class="previews">
+      <div class="preview-item">
+        <svg width="96" height="96" viewBox="0 0 96 96" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect width="96" height="96" rx="22" fill="#0D0E18"/>
+          <!-- crescent moon -->
+          <circle cx="52" cy="48" r="32" fill="#F5B93E"/>
+          <circle cx="66" cy="40" r="26" fill="#0D0E18"/>
+          <!-- cat sitting in crescent: body -->
+          <ellipse cx="32" cy="62" rx="9" ry="11" fill="#F5B93E"/>
+          <!-- head -->
+          <circle cx="32" cy="48" r="10" fill="#F5B93E"/>
+          <!-- ears -->
+          <polygon points="24,40 26,28 34,38" fill="#F5B93E"/>
+          <polygon points="30,38 38,28 40,40" fill="#F5B93E"/>
+          <!-- left eye -->
+          <ellipse cx="28" cy="48" rx="2.5" ry="3.5" fill="#0D0E18"/>
+          <!-- right eye -->
+          <ellipse cx="36" cy="48" rx="2.5" ry="3.5" fill="#0D0E18"/>
+          <!-- tail curling right -->
+          <path d="M38,70 Q60,78 62,62 Q64,52 56,54" fill="none" stroke="#F5B93E" stroke-width="5" stroke-linecap="round"/>
+        </svg>
+        <span class="size-tag">96px</span>
+      </div>
+      <div class="preview-item">
+        <svg width="60" height="60" viewBox="0 0 96 96" fill="none">
+          <rect width="96" height="96" rx="22" fill="#0D0E18"/>
+          <circle cx="52" cy="48" r="32" fill="#F5B93E"/>
+          <circle cx="66" cy="40" r="26" fill="#0D0E18"/>
+          <ellipse cx="32" cy="62" rx="9" ry="11" fill="#F5B93E"/>
+          <circle cx="32" cy="48" r="10" fill="#F5B93E"/>
+          <polygon points="24,40 26,28 34,38" fill="#F5B93E"/>
+          <polygon points="30,38 38,28 40,40" fill="#F5B93E"/>
+          <ellipse cx="28" cy="48" rx="2.5" ry="3.5" fill="#0D0E18"/>
+          <ellipse cx="36" cy="48" rx="2.5" ry="3.5" fill="#0D0E18"/>
+          <path d="M38,70 Q60,78 62,62 Q64,52 56,54" fill="none" stroke="#F5B93E" stroke-width="5" stroke-linecap="round"/>
+        </svg>
+        <span class="size-tag">60px</span>
+      </div>
+      <div class="preview-item">
+        <svg width="36" height="36" viewBox="0 0 96 96" fill="none">
+          <rect width="96" height="96" rx="22" fill="#0D0E18"/>
+          <circle cx="52" cy="48" r="32" fill="#F5B93E"/>
+          <circle cx="66" cy="40" r="26" fill="#0D0E18"/>
+          <ellipse cx="32" cy="62" rx="9" ry="11" fill="#F5B93E"/>
+          <circle cx="32" cy="48" r="10" fill="#F5B93E"/>
+          <polygon points="24,40 26,28 34,38" fill="#F5B93E"/>
+          <polygon points="30,38 38,28 40,40" fill="#F5B93E"/>
+        </svg>
+        <span class="size-tag">36px</span>
+      </div>
+    </div>
+    <p class="concept-tag">Concept E</p>
+    <p class="concept-name">Crescent</p>
+    <p class="concept-desc">A cat perched inside a crescent moon. Cats are nocturnal creatures — this leans into the "prowl at night" feeling. The silhouette is distinctive and story-rich.</p>
+  </div>
+
+</div>
+
+<!-- Wordmark row -->
+<div style="margin-top: 48px; padding-top: 40px; border-top: 1px solid #2A2C3D;">
+  <p style="font-size: 11px; letter-spacing: 5px; text-transform: uppercase; color: #555670; margin-bottom: 28px;">Wordmark</p>
+  <div style="display: flex; gap: 48px; align-items: center; flex-wrap: wrap;">
+
+    <!-- Wordmark dark bg -->
+    <svg width="180" height="52" viewBox="0 0 180 52" fill="none">
+      <text x="0" y="42" font-family="Georgia, serif" font-size="44" font-style="italic" fill="#F0EDE8" letter-spacing="-1">prowl</text>
+      <circle cx="166" cy="14" r="6" fill="#F5B93E"/>
+      <circle cx="166" cy="14" r="11" fill="none" stroke="#F5B93E" stroke-width="1.5" opacity="0.4"/>
+    </svg>
+
+    <!-- Wordmark with amber accent -->
+    <svg width="200" height="52" viewBox="0 0 200 52" fill="none">
+      <text x="0" y="42" font-family="Georgia, serif" font-size="44" font-style="italic" fill="#F5B93E" letter-spacing="-1">prowl</text>
+    </svg>
+
+    <!-- Lockup: A + wordmark -->
+    <div style="display: flex; align-items: center; gap: 14px;">
+      <svg width="44" height="44" viewBox="0 0 96 96" fill="none">
+        <rect width="96" height="96" rx="22" fill="#F5B93E"/>
+        <polygon points="18,38 28,8 44,34" fill="#0D0E18"/>
+        <polygon points="78,38 68,8 52,34" fill="#0D0E18"/>
+        <circle cx="48" cy="46" r="27" fill="#0D0E18"/>
+        <polygon points="34,68 48,90 62,68" fill="#0D0E18"/>
+        <ellipse cx="38" cy="46" rx="4" ry="6" fill="#F5B93E"/>
+        <ellipse cx="58" cy="46" rx="4" ry="6" fill="#F5B93E"/>
+      </svg>
+      <svg width="120" height="44" viewBox="0 0 120 44" fill="none">
+        <text x="0" y="36" font-family="Georgia, serif" font-size="36" font-style="italic" fill="#F0EDE8" letter-spacing="-1">prowl</text>
+      </svg>
+    </div>
+
+  </div>
+</div>
+
+</body>
+</html>
