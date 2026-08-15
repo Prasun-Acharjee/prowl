@@ -96,6 +96,15 @@ android {
         versionName "1.0.0"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
+
+        // The Maps key is injected at build time, never committed. Sources, in
+        // order: the GOOGLE_MAPS_API_KEY env var (Expo loads .env before it
+        // spawns Gradle), then a -PGOOGLE_MAPS_API_KEY property for CI.
+        // Empty means the map renders as a blank grey grid — see .env.example.
+        manifestPlaceholders = [
+            GOOGLE_MAPS_API_KEY: System.getenv('GOOGLE_MAPS_API_KEY')
+                ?: (findProperty('GOOGLE_MAPS_API_KEY') ?: '')
+        ]
     }
     signingConfigs {
         debug {
