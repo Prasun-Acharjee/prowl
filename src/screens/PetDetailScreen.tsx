@@ -16,6 +16,9 @@ import { type as t, fonts } from '../constants/typography';
 import { supabase, getUserId } from '../lib/supabase';
 import { deletePhoto } from '../lib/storage';
 import { usePet, useSightings, petKeys } from '../hooks/usePets';
+import {
+  REPORT_REASONS, ReportTarget, reportContent, blockUser, useRefreshHidden,
+} from '../hooks/useModeration';
 import { Sighting } from '../types';
 import { RootStackParamList } from '../navigation/RootNavigator';
 
@@ -40,22 +43,24 @@ function monthsKnown(iso: string) {
 }
 
 function ViewerHeader({
-  imageIndex, sighting, onClose, onDelete, deleting,
+  imageIndex, sighting, onClose, onDelete, onReport, deleting,
 }: {
   imageIndex: number;
   sighting: Sighting | undefined;
   onClose: () => void;
   onDelete: (s: Sighting) => void;
+  onReport: (s: Sighting) => void;
   deleting: boolean;
 }) {
   const insets = useSafeAreaInsets();
+  const isMine = !!sighting && sighting.userId === getUserId();
   return (
     <View style={[viewerStyles.header, { paddingTop: insets.top + 8 }]}>
       <TouchableOpacity onPress={onClose} style={viewerStyles.btn} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
         <Text style={viewerStyles.icon}>✕</Text>
       </TouchableOpacity>
-      {/* Only whoever logged the sighting can remove its photo (migration 00006). */}
-      {sighting && sighting.userId === getUserId() && (
+      {sighting && (isMine ? (
+        // Only whoever logged the sighting can remove its photo (migration 00006).
         <TouchableOpacity
           onPress={() => onDelete(sighting)}
           style={viewerStyles.btn}
@@ -66,7 +71,16 @@ function ViewerHeader({
             ? <ActivityIndicator size="small" color="rgba(255,255,255,0.8)" />
             : <Text style={viewerStyles.icon}>🗑</Text>}
         </TouchableOpacity>
-      )}
+      ) : (
+        // Everyone else gets to report it — you can't report your own photo.
+        <TouchableOpacity
+          onPress={() => onReport(sighting)}
+          style={viewerStyles.btn}
+          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+        >
+          <Text style={viewerStyles.icon}>⚑</Text>
+        </TouchableOpacity>
+      ))}
     </View>
   );
 }
@@ -109,6 +123,7 @@ export function PetDetailScreen() {
   // than letting RLS turn them into errors.
   const uid = getUserId();
   const ownsPet = !!pet && !!uid && pet.createdBy === uid;
+  const refreshHidden = useRefreshHidden();
 
   const allPhotos = useMemo(() =>
     sightings.filter(s => s.photoUri).map(s => ({ uri: s.photoUri! })),
@@ -166,6 +181,11 @@ export function PetDetailScreen() {
       backgroundColor: colors.amberFaint, alignItems: 'center' as const,
     },
     cta:     { paddingHorizontal: 20, paddingTop: 12, backgroundColor: colors.surface, borderTopWidth: 1, borderTopColor: colors.border },
+    modRow: {
+      flexDirection: 'row', justifyContent: 'space-between',
+      paddingHorizontal: 20, paddingTop: 24, paddingBottom: 4,
+      borderTopWidth: 1, borderTopColor: colors.border, marginTop: 24,
+    },
     ctaRow:  { flexDirection: 'row', gap: 10 },
     ctaBtnOutline: {
       flex: 1, paddingVertical: 16, borderRadius: 16, alignItems: 'center' as const,
@@ -242,6 +262,61 @@ export function PetDetailScreen() {
               Alert.alert('Error', err.message);
             } finally {
               setDeletingPhoto(false);
+            }
+          },
+        },
+      ],
+    );
+  }
+
+  // ── Moderation ───────────────────────────────────────────────────────────────
+
+  // Reporting hides the item for this user only. Nothing is removed for anyone
+  // else until the admin acts on it — otherwise a single report would be enough
+  // to wipe any cat off the map.
+  function handleReport(targetType: ReportTarget, targetId: string, what: string) {
+    Alert.alert(
+      `Report this ${what}?`,
+      "Tell us what's wrong. It'll be hidden from you straight away and reviewed by us.",
+      [
+        ...REPORT_REASONS.map(r => ({
+          text: r.label,
+          onPress: async () => {
+            try {
+              await reportContent(targetType, targetId, r.key);
+              setViewerIndex(null);
+              await refreshHidden();
+              Alert.alert('Thanks', "Reported. You won't see this again.");
+            } catch (err: any) {
+              Alert.alert('Error', err.message);
+            }
+          },
+        })),
+        { text: 'Cancel', style: 'cancel' as const },
+      ],
+    );
+  }
+
+  function handleBlock() {
+    const uploader = pet?.createdBy;
+    if (!uploader) {
+      Alert.alert('Not available', 'We do not know who added this cat, so there is nobody to block.');
+      return;
+    }
+    Alert.alert(
+      'Block this contributor?',
+      "You'll stop seeing every cat and photo they've added. This only affects what you see.",
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Block', style: 'destructive',
+          onPress: async () => {
+            try {
+              await blockUser(uploader);
+              await refreshHidden();
+              nav.goBack();
+            } catch (err: any) {
+              Alert.alert('Error', err.message);
             }
           },
         },
@@ -451,6 +526,21 @@ export function PetDetailScreen() {
             ))
           )}
         </View>
+
+        {/* Moderation. Hidden on your own cat — you can delete it instead. */}
+        {!ownsPet && (
+          <View style={styles.modRow}>
+            <TouchableOpacity onPress={() => handleReport('pet', pet.id, 'cat')} activeOpacity={0.6}>
+              <Text style={[t.caption, { color: colors.textMuted }]}>⚑  Report this cat</Text>
+            </TouchableOpacity>
+            {!!pet.createdBy && pet.createdBy !== uid && (
+              <TouchableOpacity onPress={handleBlock} activeOpacity={0.6}>
+                <Text style={[t.caption, { color: colors.textMuted }]}>Block contributor</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
+
         <View style={{ height: 100 }} />
       </ScrollView>
 
@@ -488,6 +578,7 @@ export function PetDetailScreen() {
             sighting={indexToSighting.get(imageIndex)}
             onClose={() => setViewerIndex(null)}
             onDelete={handleDeletePhoto}
+            onReport={s => handleReport('sighting', s.id, 'photo')}
             deleting={deletingPhoto}
           />
         )}

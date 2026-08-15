@@ -1,7 +1,8 @@
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { useFocusEffect } from '@react-navigation/native';
-import { useCallback } from 'react';
+import { useCallback, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
+import { useHiddenContent } from './useModeration';
 import { Pet, Sighting } from '../types';
 
 // ─── Avatar colours ───────────────────────────────────────────────────────────
@@ -134,6 +135,7 @@ function roundBounds(b: Bounds): Bounds {
 
 export function usePetsInViewport(bounds: Bounds | null) {
   const qc = useQueryClient();
+  const hidden = useHiddenContent();
   const rounded = bounds ? roundBounds(bounds) : null;
 
   const query = useQuery({
@@ -153,8 +155,16 @@ export function usePetsInViewport(bounds: Bounds | null) {
     }, [qc]),
   );
 
+  // Reported and blocked content is filtered out here rather than in the query,
+  // so it disappears from the map and the list the moment the user acts, with no
+  // refetch. See useHiddenContent for why this is client-side.
+  const pets = useMemo(
+    () => (query.data ?? []).filter(p => !hidden.pets.has(p.id)),
+    [query.data, hidden.pets],
+  );
+
   return {
-    pets: query.data ?? [],
+    pets,
     loading: query.isPending,
     error: query.error?.message ?? null,
   };
@@ -169,9 +179,17 @@ export function usePet(id: string) {
 }
 
 export function useSightings(petId: string, limit = 10) {
-  return useQuery({
+  const hidden = useHiddenContent();
+  const query = useQuery({
     queryKey: petKeys.sightings(petId),
     queryFn: () => fetchSightings(petId, limit),
     enabled: !!petId,
   });
+
+  const data = useMemo(
+    () => (query.data ?? []).filter(s => !hidden.sightings.has(s.id)),
+    [query.data, hidden.sightings],
+  );
+
+  return { ...query, data };
 }

@@ -31,6 +31,7 @@
     <nav>
       <button class="tab active" data-tab="pets">Pets</button>
       <button class="tab" data-tab="map">Map</button>
+      <button class="tab" data-tab="reports">Reports <span id="reports-badge" class="hidden"></span></button>
     </nav>
     <button id="signout-btn" class="ghost">Sign out</button>
   </header>
@@ -40,6 +41,7 @@
     <div class="stat-card"><span class="stat-num rose" id="stat-adoptable">–</span><span class="stat-label">adoptable</span></div>
     <div class="stat-card"><span class="stat-num amber" id="stat-adopted">–</span><span class="stat-label">adopted</span></div>
     <div class="stat-card"><span class="stat-num" id="stat-sightings">–</span><span class="stat-label">sightings · 7d</span></div>
+    <div class="stat-card"><span class="stat-num rose" id="stat-reports">–</span><span class="stat-label">open reports</span></div>
   </section>
 
   <!-- Pets tab -->
@@ -53,6 +55,21 @@
           </tr>
         </thead>
         <tbody id="pets-tbody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- Reports tab -->
+  <section id="tab-reports" class="hidden">
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th></th><th>Reported</th><th>Type</th><th>Reason</th>
+            <th>Reports</th><th>When</th><th></th>
+          </tr>
+        </thead>
+        <tbody id="reports-tbody"></tbody>
       </table>
     </div>
   </section>

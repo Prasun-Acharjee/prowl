@@ -88,7 +88,9 @@ document.querySelectorAll('.tab').forEach((btn) => {
     const tab = btn.dataset.tab;
     $('tab-pets').classList.toggle('hidden', tab !== 'pets');
     $('tab-map').classList.toggle('hidden', tab !== 'map');
+    $('tab-reports').classList.toggle('hidden', tab !== 'reports');
     if (tab === 'map' && !mapInited) initMap();
+    if (tab === 'reports') loadReports();
   });
 });
 
@@ -103,16 +105,23 @@ async function count(table, filter) {
 
 async function loadStats() {
   const weekAgo = new Date(Date.now() - 7 * 86_400_000).toISOString();
-  const [total, adoptable, adopted, sightings] = await Promise.all([
+  const [total, adoptable, adopted, sightings, openReports] = await Promise.all([
     count('pets'),
     count('pets', (q) => q.eq('status', 'adoptable')),
     count('pets', (q) => q.eq('status', 'adopted')),
     count('sightings', (q) => q.gte('created_at', weekAgo)),
+    count('reports', (q) => q.eq('status', 'open')),
   ]);
   $('stat-total').textContent = total;
   $('stat-adoptable').textContent = adoptable;
   $('stat-adopted').textContent = adopted;
   $('stat-sightings').textContent = sightings;
+  $('stat-reports').textContent = openReports;
+
+  // Surface a pending queue on the tab so it isn't missed.
+  const badge = $('reports-badge');
+  badge.textContent = openReports;
+  badge.classList.toggle('hidden', !openReports || openReports === '?');
 }
 
 /* ── Pets table ───────────────────────────────────────────────────── */
@@ -322,3 +331,136 @@ function initMap() {
 }
 
 init();
+
+/* ── Reports queue ────────────────────────────────────────────────── */
+
+// Reports are polymorphic (pet or sighting) and several people may flag the
+// same item, so they are grouped by target and shown once with a count.
+
+let reportGroups = [];
+
+async function loadReports() {
+  const tbody = $('reports-tbody');
+  tbody.innerHTML = '<tr><td colspan="7" class="muted">Loading…</td></tr>';
+
+  const { data, error } = await sb
+    .from('reports')
+    .select('*')
+    .eq('status', 'open')
+    .order('created_at', { ascending: false });
+  if (error) { toast(error.message, true); tbody.innerHTML = ''; return; }
+
+  const groups = new Map();
+  for (const r of data ?? []) {
+    const key = `${r.target_type}:${r.target_id}`;
+    const g = groups.get(key) ?? { ...r, count: 0, reasons: new Set(), ids: [] };
+    g.count += 1;
+    g.reasons.add(r.reason);
+    g.ids.push(r.id);
+    groups.set(key, g);
+  }
+  reportGroups = [...groups.values()];
+
+  // Resolve each target to something recognisable, in two queries rather than
+  // one per row.
+  const petIds = reportGroups.filter((g) => g.target_type === 'pet').map((g) => g.target_id);
+  const sightIds = reportGroups.filter((g) => g.target_type === 'sighting').map((g) => g.target_id);
+
+  const [petRes, sightRes] = await Promise.all([
+    petIds.length ? sb.from('pets').select('id,name,thumbnail_small_url,thumbnail_url').in('id', petIds) : { data: [] },
+    sightIds.length ? sb.from('sightings').select('id,pet_id,photo_url').in('id', sightIds) : { data: [] },
+  ]);
+  const petById = new Map((petRes.data ?? []).map((p) => [p.id, p]));
+  const sightById = new Map((sightRes.data ?? []).map((s) => [s.id, s]));
+
+  for (const g of reportGroups) {
+    const t = g.target_type === 'pet' ? petById.get(g.target_id) : sightById.get(g.target_id);
+    g.missing = !t;                                  // already deleted
+    g.label = g.target_type === 'pet' ? (t?.name ?? '(deleted cat)') : '(photo)';
+    g.thumb = g.target_type === 'pet'
+      ? (t?.thumbnail_small_url ?? t?.thumbnail_url ?? null)
+      : (t?.photo_url ?? null);
+  }
+
+  renderReports();
+}
+
+const REASON_LABEL = {
+  inappropriate: 'Inappropriate',
+  not_a_cat: 'Not a cat',
+  spam: 'Spam',
+  other: 'Other',
+};
+
+function renderReports() {
+  const tbody = $('reports-tbody');
+  if (!reportGroups.length) {
+    tbody.innerHTML = '<tr><td colspan="7" class="muted">Nothing reported. </td></tr>';
+    return;
+  }
+  tbody.innerHTML = '';
+
+  for (const g of reportGroups) {
+    const tr = document.createElement('tr');
+    const thumb = g.thumb
+      ? `<img src="${escapeHtml(g.thumb)}" alt="" style="width:38px;height:38px;border-radius:8px;object-fit:cover" />`
+      : `<span style="display:inline-flex;width:38px;height:38px;border-radius:8px;align-items:center;justify-content:center;background:${idColor(g.target_id)}">🐱</span>`;
+    const reasons = [...g.reasons].map((r) => REASON_LABEL[r] ?? r).join(', ');
+
+    tr.innerHTML = `
+      <td>${thumb}</td>
+      <td>${escapeHtml(g.label)}</td>
+      <td>${g.target_type}</td>
+      <td>${escapeHtml(reasons)}</td>
+      <td>${g.count}</td>
+      <td>${timeAgo(g.created_at)}</td>
+      <td class="row-actions"></td>`;
+
+    const actions = tr.querySelector('.row-actions');
+
+    // Content already gone: nothing to delete, just clear the queue entry.
+    if (!g.missing) {
+      const del = document.createElement('button');
+      del.className = 'ghost';
+      del.textContent = 'Delete content';
+      del.addEventListener('click', () => resolveReport(g, true));
+      actions.appendChild(del);
+    }
+
+    const dismiss = document.createElement('button');
+    dismiss.className = 'ghost';
+    dismiss.textContent = g.missing ? 'Clear' : 'Dismiss';
+    dismiss.addEventListener('click', () => resolveReport(g, false));
+    actions.appendChild(dismiss);
+
+    tbody.appendChild(tr);
+  }
+}
+
+async function resolveReport(g, removeContent) {
+  if (removeContent) {
+    const what = g.target_type === 'pet'
+      ? `Delete "${g.label}" and all of its sightings?`
+      : 'Delete this photo?';
+    if (!confirm(what)) return;
+
+    if (g.target_type === 'pet') {
+      const { error } = await sb.from('pets').delete().eq('id', g.target_id);
+      if (error) { toast(error.message, true); return; }
+    } else {
+      // Keep the sighting record, drop the photo — same shape as the app's
+      // clear_sighting_photo, but the admin can act on anyone's.
+      const { error } = await sb.from('sightings').update({ photo_url: null }).eq('id', g.target_id);
+      if (error) { toast(error.message, true); return; }
+    }
+  }
+
+  const { error } = await sb
+    .from('reports')
+    .update({ status: removeContent ? 'resolved' : 'dismissed' })
+    .in('id', g.ids);
+  if (error) { toast(error.message, true); return; }
+
+  toast(removeContent ? 'Content removed' : 'Report dismissed');
+  await Promise.all([loadReports(), loadStats(), loadPets()]);
+}
