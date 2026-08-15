@@ -45,14 +45,77 @@ function regionToBounds(r: Region): [number, number, number, number] {
   ];
 }
 
+// ─── Marker bitmap tracking ───────────────────────────────────────────────────
+
+// react-native-maps rasterizes each marker's React view into a bitmap. While
+// tracksViewChanges is true it re-rasterizes on every frame — fine for the moment
+// or two before the content settles, ruinous if left on: with a screenful of pins
+// it stutters and the markers visibly lag behind the map during a pan.
+//
+// So: track until the content is actually in, then stop. The image's onLoad is the
+// signal, plus one compositing beat — Android's Maps SDK snapshots too early
+// otherwise and you get blank pins. Anything that never resolves gives up on a
+// timer rather than tracking forever.
+const SETTLE_MS  = 120;
+const GIVE_UP_MS = 3000;
+
+function useMarkerSettle(photoKey: string | null, layoutKey: string | number) {
+  const [ready, setReady] = useState(false);
+  const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  // Whether this marker's content has rendered at least once.
+  const loaded = useRef(false);
+
+  const clearTimers = useCallback(() => {
+    timers.current.forEach(clearTimeout);
+    timers.current = [];
+  }, []);
+
+  const settle = useCallback(() => {
+    clearTimers();
+    timers.current.push(setTimeout(() => setReady(true), SETTLE_MS));
+  }, [clearTimers]);
+
+  // New photo (or none): wait for the image, with a give-up timer so a broken or
+  // hanging load can't leave the marker tracking forever.
+  useEffect(() => {
+    setReady(false);
+    clearTimers();
+    if (photoKey) {
+      loaded.current = false;
+      timers.current.push(setTimeout(() => setReady(true), GIVE_UP_MS));
+    } else {
+      loaded.current = true;
+      settle();
+    }
+    return clearTimers;
+  }, [photoKey, settle, clearTimers]);
+
+  // Same photo, new geometry (zoom tier, cluster count). The content is already
+  // on screen, so this just needs a re-snapshot — waiting on an onLoad that will
+  // never fire again would keep every pin tracking for the full give-up window.
+  useEffect(() => {
+    if (!loaded.current) return; // still on the initial-load path above
+    setReady(false);
+    settle();
+  }, [layoutKey, settle]);
+
+  // Handed to the image's onLoad/onError.
+  const onContentReady = useCallback(() => {
+    loaded.current = true;
+    settle();
+  }, [settle]);
+
+  return { ready, settle: onContentReady };
+}
+
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 const CLUSTER_RING  = 72;
 const CLUSTER_PHOTO = 56;
 const CLUSTER_BADGE = 26;
 
-function ClusterPin({ count, photoUri, onImageLoad }: {
-  count: number; photoUri: string | null; onImageLoad?: () => void;
+function ClusterPin({ count, photoUri, onImageSettled }: {
+  count: number; photoUri: string | null; onImageSettled?: () => void;
 }) {
   const colors = useColors();
   const photoRadius = CLUSTER_PHOTO / 2;
@@ -79,7 +142,10 @@ function ClusterPin({ count, photoUri, onImageLoad }: {
           <RNImage
             source={{ uri: photoUri }}
             style={{ width: CLUSTER_PHOTO, height: CLUSTER_PHOTO, borderRadius: photoRadius }}
-            resizeMode="cover" onLoad={onImageLoad}
+            resizeMode="cover"
+            onLoad={onImageSettled}
+            // Without onError a broken photo leaves the marker tracking forever.
+            onError={onImageSettled}
           />
         ) : (
           <Text style={{ fontSize: 22 }}>🐱</Text>
@@ -107,21 +173,18 @@ function ClusterMarker({ latitude, longitude, count, photoUri, onPress }: {
   count: number; photoUri: string | null;
   onPress: () => void;
 }) {
-  // Android: always start tracking so the Maps SDK doesn't snapshot before layout completes.
-  // iOS: start ready immediately when there's no photo (no snapshot race there).
-  const [imageReady, setImageReady] = useState(
-    Platform.OS === 'android' ? false : !photoUri,
-  );
-  useEffect(() => {
-    if (Platform.OS === 'android' && !photoUri) {
-      const raf = requestAnimationFrame(() => setImageReady(true));
-      return () => cancelAnimationFrame(raf);
-    }
-  }, []);
+  // count is the layout key: the same cluster id can absorb more pins as the
+  // viewport shifts, which changes the badge and needs a fresh snapshot.
+  const { ready, settle } = useMarkerSettle(photoUri, count);
   const handlePress = useCallback((e: any) => { e.stopPropagation(); onPress(); }, [onPress]);
   return (
-    <Marker coordinate={{ latitude, longitude }} onPress={handlePress} tracksViewChanges={Platform.OS === 'android' ? true : !imageReady} anchor={{ x: 0.5, y: 0.5 }}>
-      <ClusterPin count={count} photoUri={photoUri} onImageLoad={() => { requestAnimationFrame(() => setImageReady(true)); }} />
+    <Marker
+      coordinate={{ latitude, longitude }}
+      onPress={handlePress}
+      tracksViewChanges={!ready}
+      anchor={{ x: 0.5, y: 0.5 }}
+    >
+      <ClusterPin count={count} photoUri={photoUri} onImageSettled={settle} />
     </Marker>
   );
 }
@@ -130,26 +193,19 @@ function PetMarker({ pet, size, tier, onPress }: {
   pet: Pet; size: number; tier: PinTier; onPress: () => void;
 }) {
   const photoSrc = pet.thumbnailSmallUrl ?? pet.thumbnailUrl;
-  // Android: always start tracking — key={id-tier} remounts on zoom, and the Maps SDK
-  // snapshots immediately when tracksViewChanges=false, before layout finishes.
-  // iOS: start ready when no photo (fast path unchanged).
-  const [imageReady, setImageReady] = useState(
-    Platform.OS === 'android' ? false : !photoSrc,
-  );
-  useEffect(() => {
-    if (Platform.OS === 'android' && !photoSrc) {
-      const raf = requestAnimationFrame(() => setImageReady(true));
-      return () => cancelAnimationFrame(raf);
-    }
-    // photo case: onImageLoad + requestAnimationFrame below handles the flip
-  }, []);
+  // size is the layout key: crossing a zoom tier resizes the pin, so the bitmap
+  // has to be re-snapshotted. Cheaper than remounting the marker, which is what
+  // key={id-tier} used to do to every pin on the map at once.
+  const { ready, settle } = useMarkerSettle(photoSrc, size);
   const handlePress = useCallback((e: any) => { e.stopPropagation(); onPress(); }, [onPress]);
   return (
     <Marker
       coordinate={{ latitude: pet.latitude, longitude: pet.longitude }}
-      onPress={handlePress} tracksViewChanges={Platform.OS === 'android' ? true : !imageReady} anchor={{ x: 0.5, y: 1 }}
+      onPress={handlePress}
+      tracksViewChanges={!ready}
+      anchor={{ x: 0.5, y: 1 }}
     >
-      <PetPin pet={pet} size={size} showBorder={tier === 'lg'} onImageLoad={() => { requestAnimationFrame(() => setImageReady(true)); }} />
+      <PetPin pet={pet} size={size} showBorder={tier === 'lg'} onImageLoad={settle} />
     </Marker>
   );
 }
@@ -420,7 +476,7 @@ export function MapScreen() {
           const pet: Pet = props.pet;
           return (
             <PetMarker
-              key={`${pet.id}-${tier}`}
+              key={pet.id}
               pet={pet} size={pinSize} tier={tier}
               onPress={() => openPinSheet(pet)}
             />

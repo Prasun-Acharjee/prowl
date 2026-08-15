@@ -5,18 +5,23 @@ import { ColorTheme } from '../constants/colors';
 import { fonts } from '../constants/typography';
 import { Pet } from '../types';
 
-const NOW = Date.now();
-
+// Read the clock per call — a module-level constant freezes at import time and
+// leaves pin colours stale for the whole session.
 function pinColor(lastSeenAt: string, c: ColorTheme): string {
-  const hours = (NOW - new Date(lastSeenAt).getTime()) / 3_600_000;
+  const hours = (Date.now() - new Date(lastSeenAt).getTime()) / 3_600_000;
   if (hours < 24)  return c.amber;
   if (hours < 168) return c.rose;
   return c.textMuted;
 }
 
 function isRecent(lastSeenAt: string): boolean {
-  return NOW - new Date(lastSeenAt).getTime() < 86_400_000;
+  return Date.now() - new Date(lastSeenAt).getTime() < 86_400_000;
 }
+
+// Android clips a marker's children to the view bounds when it rasterizes the
+// view into a bitmap; iOS does not. The adoptable badge overhangs the circle, so
+// the wrapper is padded to bring it back inside the bounds that get captured.
+const OVERHANG = 8;
 
 interface PetPinProps {
   pet:          Pet;
@@ -60,7 +65,17 @@ export function PetPin({ pet, size = 44, onImageLoad, showBorder = false }: PetP
   const ringOpacity = ring.interpolate({ inputRange: [1, 2.6], outputRange: [0.55, 0] });
 
   return (
-    <View collapsable={false} style={{ alignItems: 'center' }}>
+    <View
+      collapsable={false}
+      style={{
+        alignItems: 'center',
+        // border-box sizing: content width stays exactly `size`.
+        width: size + OVERHANG * 2,
+        paddingHorizontal: OVERHANG,
+        paddingTop: OVERHANG,
+        // No bottom padding — the marker's y:1 anchor must land on the tip.
+      }}
+    >
       {recent && Platform.OS !== 'android' && (
         <Animated.View style={{
           position: 'absolute', top: 0,
@@ -100,7 +115,9 @@ export function PetPin({ pet, size = 44, onImageLoad, showBorder = false }: PetP
         )}
       </View>
 
-      {/* Sibling of the circle — inside it, overflow:'hidden' would clip the badge */}
+      {/* Sibling of the circle — inside it, overflow:'hidden' would clip the badge.
+          The -3 overhang is absorbed by the wrapper's OVERHANG padding so Android
+          still captures it in the marker bitmap. */}
       {adoptable && (
         <View style={{
           position: 'absolute', top: -3, right: -3,
