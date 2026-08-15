@@ -27,9 +27,13 @@ export default {
           apiKey: process.env.GOOGLE_MAPS_API_KEY,
         },
       },
+      // RECORD_AUDIO deliberately absent: expo-camera declares it for video
+      // capture, which Prowl does not use, and it would force a microphone
+      // disclosure in Play's Data Safety form. Also stripped from the native
+      // manifest via tools:node="remove" — this list alone only affects a fresh
+      // `expo prebuild`, and android/ is committed.
       permissions: [
         'android.permission.CAMERA',
-        'android.permission.RECORD_AUDIO',
         'android.permission.ACCESS_COARSE_LOCATION',
         'android.permission.ACCESS_FINE_LOCATION',
       ],
