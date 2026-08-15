@@ -5480,6 +5480,7 @@ __metadata:
     "@types/supercluster": ^7.1.3
     expo: ~54.0.0
     expo-camera: ~17.0.10
+    expo-file-system: ~19.0.23
     expo-font: ~14.0.12
     expo-image: ~3.0.11
     expo-image-manipulator: ~14.0.8
