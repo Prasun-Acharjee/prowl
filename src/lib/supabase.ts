@@ -48,10 +48,24 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   },
 });
 
+// Cached so ownership checks in the UI don't need an async call on every render.
+// App.tsx awaits ensureAuth() before the first screen mounts.
+let userId: string | null = null;
+
+export function getUserId(): string | null {
+  return userId;
+}
+
 export async function ensureAuth(): Promise<void> {
   const { data: { session } } = await supabase.auth.getSession();
-  if (!session) {
-    const { error } = await supabase.auth.signInAnonymously();
-    if (error) console.warn('Anonymous sign-in failed:', error.message);
+  if (session) {
+    userId = session.user.id;
+    return;
   }
+  const { data, error } = await supabase.auth.signInAnonymously();
+  if (error) {
+    console.warn('Anonymous sign-in failed:', error.message);
+    return;
+  }
+  userId = data.user?.id ?? null;
 }

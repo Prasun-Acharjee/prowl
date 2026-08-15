@@ -20,6 +20,8 @@ type Nav = StackNavigationProp<RootStackParamList, 'Camera'>;
 
 type Screen = 'capture' | 'uploading' | 'candidates' | 'new-cat';
 
+const SEARCH_RADIUS_M = 300;
+
 interface Candidate {
   id:             string;
   name:           string;
@@ -98,20 +100,25 @@ export function CameraScreen() {
 
       let rows: Candidate[] = [];
       if (effectiveCoords) {
+        const { lat, lng } = effectiveCoords;
+
+        // Sorted by distance from where the photo was taken — nearby_pets orders
+        // by ST_Distance, so the closest cat is already first. effectiveCoords
+        // prefers the photo's own EXIF GPS over the device's current position, so
+        // a library photo sorts against where it was shot, not where you stand.
         const { data } = await supabase.rpc('nearby_pets', {
-          lat: effectiveCoords.lat, lng: effectiveCoords.lng, radius_meters: 300,
+          lat, lng, radius_meters: SEARCH_RADIUS_M,
         });
-        if (data) {
-          rows = (data as any[]).map(row => ({
-            id:             row.id,
-            name:           row.name,
-            thumbnailUrl:   row.thumbnail_url,
-            color:          idColor(row.id),
-            initial:        row.name.charAt(0).toUpperCase(),
-            sightingCount:  row.sighting_count,
-            distanceMeters: row.distance_meters ?? 0,
-          }));
-        }
+
+        rows = ((data ?? []) as any[]).map(row => ({
+          id:             row.id,
+          name:           row.name,
+          thumbnailUrl:   row.thumbnail_url,
+          color:          idColor(row.id),
+          initial:        row.name.charAt(0).toUpperCase(),
+          sightingCount:  row.sighting_count,
+          distanceMeters: row.distance_meters ?? 0,
+        }));
       }
 
       setCandidates(rows);
@@ -128,15 +135,14 @@ export function CameraScreen() {
     if (!c) return;
     setSaving(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      await supabase.rpc('log_sighting', {
-        p_pet_id:        petId,
-        p_user_id:       user?.id ?? null,
-        p_lat:           c.lat,
-        p_lng:           c.lng,
-        p_photo_url:     uploadedUrl,
+      const { error } = await supabase.rpc('log_sighting', {
+        p_pet_id:          petId,
+        p_lat:             c.lat,
+        p_lng:             c.lng,
+        p_photo_url:       uploadedUrl,
         p_photo_thumb_url: uploadedThumbUrl,
       });
+      if (error) throw new Error(error.message);
       nav.dispatch(StackActions.replace('PetDetail', { petId }));
     } catch (err: any) {
       Alert.alert('Error', err.message);
@@ -171,7 +177,6 @@ export function CameraScreen() {
     if (!c) return;
     setSaving(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
       const name = newCatName.trim() || locationName || 'Community cat';
 
       const { data: pet, error } = await supabase
@@ -187,14 +192,14 @@ export function CameraScreen() {
 
       if (error || !pet) throw error ?? new Error('Insert failed');
 
-      await supabase.rpc('log_sighting', {
-        p_pet_id:         pet.id,
-        p_user_id:        user?.id ?? null,
-        p_lat:            c.lat,
-        p_lng:            c.lng,
-        p_photo_url:      uploadedUrl,
+      const { error: logErr } = await supabase.rpc('log_sighting', {
+        p_pet_id:          pet.id,
+        p_lat:             c.lat,
+        p_lng:             c.lng,
+        p_photo_url:       uploadedUrl,
         p_photo_thumb_url: uploadedThumbUrl,
       });
+      if (logErr) throw new Error(logErr.message);
 
       nav.navigate('PetDetail', { petId: pet.id });
     } catch (err: any) {
@@ -314,7 +319,7 @@ export function CameraScreen() {
       {screen === 'candidates' && (
         <View style={[styles.matchPanel, { paddingBottom: insets.bottom + 16 }]}>
           <Text style={[t.label, { color: colors.textMuted, marginBottom: 14 }]}>
-            {candidates.length > 0 ? 'Cats spotted nearby' : 'No known cats in range'}
+            {candidates.length > 0 ? 'Nearest cats first' : 'No known cats in range'}
           </Text>
           <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 240 }}>
             {candidates.map(c => (

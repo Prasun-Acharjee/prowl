@@ -13,8 +13,8 @@ import { useQueryClient } from '@tanstack/react-query';
 import * as Location from 'expo-location';
 import { useTheme } from '../context/ThemeContext';
 import { type as t, fonts } from '../constants/typography';
-import { supabase } from '../lib/supabase';
-import { deletePhoto, toThumbPublicUrl } from '../lib/storage';
+import { supabase, getUserId } from '../lib/supabase';
+import { deletePhoto } from '../lib/storage';
 import { usePet, useSightings, petKeys } from '../hooks/usePets';
 import { Sighting } from '../types';
 import { RootStackParamList } from '../navigation/RootNavigator';
@@ -54,7 +54,8 @@ function ViewerHeader({
       <TouchableOpacity onPress={onClose} style={viewerStyles.btn} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
         <Text style={viewerStyles.icon}>✕</Text>
       </TouchableOpacity>
-      {sighting && (
+      {/* Only whoever logged the sighting can remove its photo (migration 00006). */}
+      {sighting && sighting.userId === getUserId() && (
         <TouchableOpacity
           onPress={() => onDelete(sighting)}
           style={viewerStyles.btn}
@@ -103,6 +104,11 @@ export function PetDetailScreen() {
   const [deletingPhoto, setDeletingPhoto] = useState(false);
   const [saving, setSaving]               = useState(false);
   const [viewerIndex, setViewerIndex]     = useState<number | null>(null);
+
+  // Ownership drives what's deletable (migration 00006). Hide the buttons rather
+  // than letting RLS turn them into errors.
+  const uid = getUserId();
+  const ownsPet = !!pet && !!uid && pet.createdBy === uid;
 
   const allPhotos = useMemo(() =>
     sightings.filter(s => s.photoUri).map(s => ({ uri: s.photoUri! })),
@@ -188,7 +194,7 @@ export function PetDetailScreen() {
             try {
               const { error } = await supabase.from('pets').delete().eq('id', pet.id);
               if (error) throw error;
-              await qc.invalidateQueries({ queryKey: ['pets', 'nearby'] });
+              await qc.invalidateQueries({ queryKey: ['pets'] });
               nav.goBack();
             } catch (err: any) {
               Alert.alert('Error', err.message);
@@ -212,28 +218,19 @@ export function PetDetailScreen() {
           onPress: async () => {
             setDeletingPhoto(true);
             try {
+              // One RPC: nulls photo_url and repairs the pet's thumbnails if it
+              // was showing this photo. Repairing pets from the client is no
+              // longer permitted for non-creators, and this also removes the
+              // race between the two writes.
+              //
+              // Runs before the storage delete because it is the authorization
+              // check: deleting the file first would leave a dangling reference
+              // if the RPC then rejected. An orphaned file is the safer failure.
+              const { error: rpcErr } = await supabase
+                .rpc('clear_sighting_photo', { p_sighting_id: sighting.id });
+              if (rpcErr) throw new Error(rpcErr.message);
+
               await deletePhoto(sighting.photoUri!);
-
-              const { error: updateErr } = await supabase
-                .from('sightings').update({ photo_url: null }).eq('id', sighting.id);
-              if (updateErr) throw new Error(updateErr.message);
-
-              if (pet && (pet.thumbnailUrl === sighting.photoUri || pet.thumbnailSmallUrl === toThumbPublicUrl(sighting.photoUri!))) {
-                const { data: next } = await supabase
-                  .from('sightings')
-                  .select('photo_url')
-                  .eq('pet_id', petId)
-                  .neq('id', sighting.id)
-                  .not('photo_url', 'is', null)
-                  .order('created_at', { ascending: false })
-                  .limit(1)
-                  .maybeSingle();
-
-                await supabase.from('pets').update({
-                  thumbnail_url:       next?.photo_url ?? null,
-                  thumbnail_small_url: next?.photo_url ? toThumbPublicUrl(next.photo_url) : null,
-                }).eq('id', petId);
-              }
 
               setViewerIndex(null);
               await Promise.all([
@@ -269,18 +266,18 @@ export function PetDetailScreen() {
     if (!pet) return;
     setSaving(true);
     try {
-      const [{ status }, locResult, authResult] = await Promise.all([
-        Location.requestForegroundPermissionsAsync(),
-        Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
-        supabase.auth.getUser(),
-      ]);
+      // Sequential, not Promise.all: reading the position before the permission
+      // prompt resolves throws on a fresh install.
+      const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') return;
-      await supabase.rpc('log_sighting', {
+      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+
+      const { error } = await supabase.rpc('log_sighting', {
         p_pet_id:  pet.id,
-        p_user_id: authResult.data.user?.id ?? null,
-        p_lat:     locResult.coords.latitude,
-        p_lng:     locResult.coords.longitude,
+        p_lat:     loc.coords.latitude,
+        p_lng:     loc.coords.longitude,
       });
+      if (error) throw new Error(error.message);
       await qc.invalidateQueries({ queryKey: ['pets'] });
     } catch (err: any) {
       Alert.alert('Error', err.message);
@@ -354,13 +351,15 @@ export function PetDetailScreen() {
             </View>
           </TouchableOpacity>
 
-          <TouchableOpacity onPress={handleDelete} disabled={deleting} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
-            <View style={styles.heroPill}>
-              {deleting
-                ? <ActivityIndicator size="small" color="rgba(13,14,24,0.7)" />
-                : <Text style={{ fontSize: 15 }}>🗑</Text>}
-            </View>
-          </TouchableOpacity>
+          {ownsPet && (
+            <TouchableOpacity onPress={handleDelete} disabled={deleting} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+              <View style={styles.heroPill}>
+                {deleting
+                  ? <ActivityIndicator size="small" color="rgba(13,14,24,0.7)" />
+                  : <Text style={{ fontSize: 15 }}>🗑</Text>}
+              </View>
+            </TouchableOpacity>
+          )}
         </View>
 
         <View style={styles.heroMeta}>

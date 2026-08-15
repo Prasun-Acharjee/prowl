@@ -19,6 +19,9 @@ export interface Pet {
   // Adoption status is set only via the Supabase dashboard (owner/shelters).
   status: PetStatus;
   adoptionContact: string | null;    // email or E.164 phone, publicly visible
+  // Who added this cat. Null for rows predating migration 00006 — those are
+  // admin-only to delete. Drives whether the delete button is shown at all.
+  createdBy: string | null;
   // UI-only: deterministic avatar colour derived from the pet ID.
   // Replaced by thumbnailUrl once the pet has a real photo.
   color: string;
@@ -34,13 +37,4 @@ export interface Sighting {
   timestamp: string;     // ISO 8601
   photoUri?: string;
   note?: string;
-}
-
-// Result shape from the match_pets() RPC (Phase 5 — embedding search)
-export interface PetMatch {
-  id: string;
-  name: string;
-  thumbnailUrl: string | null;
-  similarity: number;
-  distanceMeters: number;
 }

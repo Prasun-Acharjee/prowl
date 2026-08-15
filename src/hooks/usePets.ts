@@ -28,6 +28,7 @@ interface PetGeoRow {
   thumbnail_small_url: string | null;
   status: string;
   adoption_contact: string | null;
+  created_by: string | null;
 }
 
 function toPet(row: PetGeoRow): Pet {
@@ -46,6 +47,7 @@ function toPet(row: PetGeoRow): Pet {
     // Fallback tolerates a client built before migration 00004 has run.
     status: (row.status as Pet['status']) ?? 'stray',
     adoptionContact: row.adoption_contact ?? null,
+    createdBy: row.created_by ?? null,
     color: idColor(row.id),
     initial: row.name.charAt(0).toUpperCase(),
   };
@@ -54,8 +56,6 @@ function toPet(row: PetGeoRow): Pet {
 // ─── Query key factories ──────────────────────────────────────────────────────
 
 export const petKeys = {
-  nearby: (lat: number, lng: number, radius: number) =>
-    ['pets', 'nearby', lat, lng, radius] as const,
   inBounds: (west: number, south: number, east: number, north: number) =>
     ['pets', 'bounds', west, south, east, north] as const,
   detail: (id: string) => ['pets', 'detail', id] as const,
@@ -74,15 +74,9 @@ export async function fetchPetsInBounds(
     .lte('longitude', east)
     .gte('latitude', south)
     .lte('latitude', north)
-    .order('last_seen_at', { ascending: false });
-
-  if (error) throw new Error(error.message);
-  return ((data ?? []) as PetGeoRow[]).map(toPet);
-}
-
-export async function fetchNearbyPets(lat: number, lng: number, radiusMeters: number): Promise<Pet[]> {
-  const { data, error } = await supabase
-    .rpc('nearby_pets', { lat, lng, radius_meters: radiusMeters });
+    .order('last_seen_at', { ascending: false })
+    // Without a cap, a zoomed-all-the-way-out viewport pulls every row in the table.
+    .limit(500);
 
   if (error) throw new Error(error.message);
   return ((data ?? []) as PetGeoRow[]).map(toPet);
@@ -123,31 +117,6 @@ export async function fetchSightings(petId: string, limit = 10): Promise<Sightin
 
 // ─── Hooks ────────────────────────────────────────────────────────────────────
 
-export function useNearbyPets(lat: number | null, lng: number | null, radiusMeters = 500) {
-  const qc = useQueryClient();
-
-  const query = useQuery({
-    queryKey: lat != null && lng != null ? petKeys.nearby(lat, lng, radiusMeters) : ['pets', 'nearby', 'disabled'],
-    queryFn: () => fetchNearbyPets(lat!, lng!, radiusMeters),
-    enabled: lat != null && lng != null,
-  });
-
-  useFocusEffect(
-    useCallback(() => {
-      if (lat != null && lng != null) {
-        qc.invalidateQueries({ queryKey: petKeys.nearby(lat, lng, radiusMeters) });
-      }
-    }, [lat, lng, radiusMeters, qc]),
-  );
-
-  return {
-    pets: query.data ?? [],
-    loading: query.isPending,
-    error: query.error?.message ?? null,
-    refetch: query.refetch,
-  };
-}
-
 type Bounds = [west: number, south: number, east: number, north: number];
 
 function roundBounds(b: Bounds): Bounds {
@@ -175,12 +144,13 @@ export function usePetsInViewport(bounds: Bounds | null) {
     placeholderData: keepPreviousData,
   });
 
+  // Refresh when the user returns to the map — e.g. after logging a sighting.
+  // Deliberately keyed on nothing but qc: keying it on the bounds re-fired the
+  // effect on every pan, invalidating the whole cache and defeating staleTime.
   useFocusEffect(
     useCallback(() => {
-      if (rounded) {
-        qc.invalidateQueries({ queryKey: ['pets', 'bounds'] });
-      }
-    }, [rounded?.[0], rounded?.[1], rounded?.[2], rounded?.[3], qc]),
+      qc.invalidateQueries({ queryKey: ['pets', 'bounds'] });
+    }, [qc]),
   );
 
   return {

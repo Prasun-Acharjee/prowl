@@ -27,10 +27,6 @@ export async function deletePhoto(photoUrl: string): Promise<void> {
   if (error) throw new Error(error.message);
 }
 
-export function toThumbPublicUrl(photoUrl: string): string {
-  return photoUrl.replace(/\.jpg$/, '_thumb.jpg');
-}
-
 export interface UploadResult {
   publicUrl: string;
   thumbPublicUrl: string;
@@ -74,8 +70,11 @@ export async function uploadPhoto(
   folder: 'sightings' | 'pets',
   id: string,
 ): Promise<UploadResult> {
+  // No anon-key fallback: it can't satisfy the bucket's insert policy anyway, and
+  // a file uploaded without a JWT has no owner, so nobody can ever delete it.
   const { data: { session } } = await supabase.auth.getSession();
-  const token = session?.access_token ?? SUPABASE_ANON_KEY;
+  if (!session) throw new Error('Not signed in — cannot upload photo');
+  const token = session.access_token;
 
   const fullPath  = `${folder}/${id}.jpg`;
   const thumbPath = `${folder}/${id}_thumb.jpg`;
