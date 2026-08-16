@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Animated, PanResponder,
-  Platform, ActivityIndicator, ScrollView,
+  Platform, ActivityIndicator, ScrollView, TextInput,
   Image as RNImage,
 } from 'react-native';
 import { Image } from 'expo-image';
@@ -17,7 +17,9 @@ import { DARK_MAP_STYLE } from '../constants/mapStyle';
 import { PetPin } from '../components/PetPin';
 import { Pet } from '../types';
 import { RootStackParamList } from '../navigation/RootNavigator';
-import { usePetsInViewport } from '../hooks/usePets';
+import { usePetsInViewport, usePetSearch } from '../hooks/usePets';
+import { applyFilters, PetFilters, NO_FILTERS } from '../lib/petFilters';
+import { getUserId } from '../lib/supabase';
 
 type Nav = StackNavigationProp<RootStackParamList, 'Map'>;
 
@@ -218,7 +220,10 @@ const FALLBACK_REGION: Region = {
 };
 
 const LIST_PEEK = 80;
-const LIST_FULL = 340;
+// Raised from 340 when the search field and filter chips were added: the header
+// grew by ~90px, and at the old height the list itself was down to three rows.
+// Peek is unchanged, so collapsed the sheet still shows just the summary row.
+const LIST_FULL = 430;
 const PIN_SHEET = 210;
 
 function timeAgo(iso: string) {
@@ -250,7 +255,37 @@ export function MapScreen() {
   const listY     = useRef(new Animated.Value(LIST_FULL - LIST_PEEK)).current;
   const mapRef    = useRef<MapView>(null);
 
-  const { pets, loading } = usePetsInViewport(queryBounds);
+  const [filters, setFilters] = useState<PetFilters>(NO_FILTERS);
+  const [search, setSearch]   = useState('');
+
+  const { pets: viewportPets, loading } = usePetsInViewport(queryBounds);
+  const { data: searchHits = [], isFetching: searching } = usePetSearch(search);
+  const searchMode = search.trim().length >= 2;
+
+  // Chips narrow both the pins and the list, so the map always reflects what
+  // the list is showing.
+  const pets = useMemo(
+    () => applyFilters(viewportPets, filters, getUserId()),
+    [viewportPets, filters],
+  );
+  const listPets = useMemo(
+    () => (searchMode ? applyFilters(searchHits, filters, getUserId()) : pets),
+    [searchMode, searchHits, filters, pets],
+  );
+
+  function toggleFilter(key: keyof PetFilters) {
+    setFilters(f => ({ ...f, [key]: !f[key] }));
+  }
+
+  // A search hit is usually off-screen, so selecting one has to move the map.
+  function goToPet(pet: Pet) {
+    setSearch('');
+    mapRef.current?.animateToRegion({
+      latitude: pet.latitude, longitude: pet.longitude,
+      latitudeDelta: 0.01, longitudeDelta: 0.01,
+    }, 600);
+    openPinSheet(pet);
+  }
 
   // ── Clustering ──────────────────────────────────────────────────────────────
 
@@ -420,6 +455,21 @@ export function MapScreen() {
     listHeader:    { paddingHorizontal: 20, paddingBottom: 10 },
     handleArea:    { alignItems: 'center' as const, paddingVertical: 10 },
     listHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+    searchRow: {
+      flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 10,
+    },
+    searchInput: {
+      flex: 1, height: 38, borderRadius: 10,
+      backgroundColor: colors.elevated, borderWidth: 1, borderColor: colors.border,
+      paddingHorizontal: 12,
+      color: colors.textPrimary, fontFamily: 'Inter_400Regular', fontSize: 14,
+    },
+    chipRow: { flexDirection: 'row', gap: 8, marginTop: 10 },
+    chip: {
+      paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20,
+      borderWidth: 1, borderColor: colors.border, backgroundColor: colors.elevated,
+    },
+    chipOn: { backgroundColor: colors.amberFaint, borderColor: colors.amberBorder },
     logBtn:     { backgroundColor: colors.amber, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20 },
     logBtnText: { fontFamily: 'Inter_700Bold', fontSize: 13, color: colors.onAmber },
     catRow: {
@@ -567,25 +617,68 @@ export function MapScreen() {
             <View style={styles.listHeaderRow}>
               <TouchableOpacity onPress={toggleList} activeOpacity={0.7} style={{ flex: 1 }}>
                 <Text style={[t.bodyMed, { color: colors.textPrimary }]}>
-                  {loading
-                    ? 'Finding cats…'
-                    : pets.length === 0
-                      ? 'No cats in this area'
-                      : `${pets.length} cat${pets.length !== 1 ? 's' : ''} in view`}
+                  {searchMode
+                    ? (searching ? 'Searching…' : `${listPets.length} match${listPets.length !== 1 ? 'es' : ''}`)
+                    : loading
+                      ? 'Finding cats…'
+                      : listPets.length === 0
+                        ? 'No cats in this area'
+                        : `${listPets.length} cat${listPets.length !== 1 ? 's' : ''} in view`}
                 </Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.logBtn} onPress={() => nav.navigate('Camera')} activeOpacity={0.8}>
                 <Text style={styles.logBtnText}>📷  Log sighting</Text>
               </TouchableOpacity>
             </View>
+
+            <View style={styles.searchRow}>
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Search cats by name…"
+                placeholderTextColor={colors.textMuted}
+                value={search}
+                onChangeText={setSearch}
+                onFocus={snapToOpen}
+                autoCorrect={false}
+                returnKeyType="search"
+              />
+              {!!search && (
+                <TouchableOpacity onPress={() => setSearch('')} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                  <Text style={[t.caption, { color: colors.textMuted }]}>Clear</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+
+            <View style={styles.chipRow}>
+              <TouchableOpacity
+                style={[styles.chip, filters.adoptable && styles.chipOn]}
+                onPress={() => toggleFilter('adoptable')}
+                activeOpacity={0.7}
+              >
+                <Text style={[t.caption, { color: filters.adoptable ? colors.rose : colors.textSecondary }]}>
+                  ♥  Adoptable
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.chip, filters.mine && styles.chipOn]}
+                onPress={() => toggleFilter('mine')}
+                activeOpacity={0.7}
+              >
+                <Text style={[t.caption, { color: filters.mine ? colors.amber : colors.textSecondary }]}>
+                  Mine
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
 
           <ScrollView scrollEnabled={listOpen} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-            {pets.map((pet, i) => (
+            {listPets.map((pet, i) => (
               <TouchableOpacity
                 key={pet.id}
                 style={[styles.catRow, i === 0 && { borderTopWidth: 1, borderTopColor: colors.border }]}
-                onPress={() => nav.navigate('PetDetail', { petId: pet.id })}
+                // A search hit is usually off-screen, so tapping it moves the map
+                // there instead of jumping straight to the profile.
+                onPress={() => (searchMode ? goToPet(pet) : nav.navigate('PetDetail', { petId: pet.id }))}
                 activeOpacity={0.72}
               >
                 {(pet.thumbnailSmallUrl ?? pet.thumbnailUrl) ? (
@@ -608,10 +701,14 @@ export function MapScreen() {
                 <Text style={[t.caption, { color: colors.textMuted, fontSize: 18 }]}>›</Text>
               </TouchableOpacity>
             ))}
-            {pets.length === 0 && !loading && (
+            {listPets.length === 0 && !loading && !searching && (
               <View style={styles.emptyState}>
                 <Text style={[t.body, { color: colors.textMuted, textAlign: 'center' }]}>
-                  No cats spotted nearby yet.{'\n'}Use the button above to add one.
+                  {searchMode
+                    ? `No cats named “${search.trim()}”.`
+                    : filters.adoptable || filters.mine
+                      ? 'No cats here match those filters.'
+                      : `No cats spotted nearby yet.\nUse the button above to add one.`}
                 </Text>
               </View>
             )}

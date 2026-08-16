@@ -53,6 +53,9 @@ export function CameraScreen() {
   const [newCatName, setNewCatName] = useState('');
   const [saving, setSaving]       = useState(false);
   const [locationName, setLocationName] = useState('');
+  // Optional, and shared by every candidate: typing a note then tapping a cat
+  // keeps logging a single tap rather than adding a confirm step.
+  const [note, setNote]           = useState('');
 
   const photoCoords = useRef<{ lat: number; lng: number } | null>(null);
 
@@ -141,6 +144,7 @@ export function CameraScreen() {
         p_lng:             c.lng,
         p_photo_url:       uploadedUrl,
         p_photo_thumb_url: uploadedThumbUrl,
+        p_note:            note.trim() || null,
       });
       if (error) throw new Error(error.message);
       nav.dispatch(StackActions.replace('PetDetail', { petId }));
@@ -198,6 +202,7 @@ export function CameraScreen() {
         p_lng:             c.lng,
         p_photo_url:       uploadedUrl,
         p_photo_thumb_url: uploadedThumbUrl,
+        p_note:            note.trim() || null,
       });
       if (logErr) throw new Error(logErr.message);
 
@@ -256,6 +261,12 @@ export function CameraScreen() {
       backgroundColor: colors.elevated, borderRadius: 12, borderWidth: 1, borderColor: colors.border,
     },
     newCatPanel: { flex: 1, paddingHorizontal: 20, paddingTop: 32, backgroundColor: colors.surface },
+    noteInput: {
+      backgroundColor: colors.elevated, borderRadius: 10,
+      borderWidth: 1, borderColor: colors.border,
+      paddingHorizontal: 12, paddingVertical: 10, marginBottom: 12,
+      color: colors.textPrimary, fontFamily: 'Inter_400Regular', fontSize: 14,
+    },
     nameInput: {
       backgroundColor: colors.elevated, borderRadius: 14, borderWidth: 1, borderColor: colors.border,
       paddingHorizontal: 16, paddingVertical: 14, marginBottom: 8,
@@ -321,6 +332,14 @@ export function CameraScreen() {
           <Text style={[t.label, { color: colors.textMuted, marginBottom: 14 }]}>
             {candidates.length > 0 ? 'Nearest cats first' : 'No known cats in range'}
           </Text>
+          <TextInput
+            style={styles.noteInput}
+            placeholder="Add a note (optional) — e.g. limping, new collar"
+            placeholderTextColor={colors.textMuted}
+            value={note}
+            onChangeText={setNote}
+            maxLength={200}
+          />
           <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 240 }}>
             {candidates.map(c => (
               <TouchableOpacity key={c.id} style={styles.matchRow} onPress={() => confirmMatch(c.id)} disabled={saving}>

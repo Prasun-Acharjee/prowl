@@ -83,6 +83,38 @@ export async function fetchPetsInBounds(
   return ((data ?? []) as PetGeoRow[]).map(toPet);
 }
 
+/**
+ * Name search across the whole table, not just the viewport — the point is to
+ * find a cat you cannot currently see. Escapes LIKE wildcards so a name
+ * containing % or _ is searched literally.
+ */
+export async function searchPetsByName(query: string): Promise<Pet[]> {
+  const q = query.trim().replace(/[%_\\]/g, m => `\\${m}`);
+  if (!q) return [];
+
+  const { data, error } = await supabase
+    .from('pets_geo')
+    .select('*')
+    .ilike('name', `%${q}%`)
+    .order('last_seen_at', { ascending: false })
+    .limit(20);
+
+  if (error) throw new Error(error.message);
+  return ((data ?? []) as PetGeoRow[]).map(toPet);
+}
+
+export function usePetSearch(query: string) {
+  const trimmed = query.trim();
+  return useQuery({
+    queryKey: ['pets', 'search', trimmed],
+    queryFn: () => searchPetsByName(trimmed),
+    // Two characters minimum: single letters match most of the table and would
+    // fire a query on every keystroke for no useful result.
+    enabled: trimmed.length >= 2,
+    staleTime: 60_000,
+  });
+}
+
 export async function fetchPet(id: string): Promise<Pet | null> {
   const { data, error } = await supabase
     .from('pets_geo')

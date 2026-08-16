@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  ActivityIndicator, Alert, Linking,
+  ActivityIndicator, Alert, Linking, TextInput,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -118,6 +118,10 @@ export function PetDetailScreen() {
   const [deletingPhoto, setDeletingPhoto] = useState(false);
   const [saving, setSaving]               = useState(false);
   const [viewerIndex, setViewerIndex]     = useState<number | null>(null);
+  const [editing, setEditing]             = useState(false);
+  const [editName, setEditName]           = useState('');
+  const [editDesc, setEditDesc]           = useState('');
+  const [savingEdit, setSavingEdit]       = useState(false);
 
   // Ownership drives what's deletable (migration 00006). Hide the buttons rather
   // than letting RLS turn them into errors.
@@ -181,6 +185,12 @@ export function PetDetailScreen() {
       backgroundColor: colors.amberFaint, alignItems: 'center' as const,
     },
     cta:     { paddingHorizontal: 20, paddingTop: 12, backgroundColor: colors.surface, borderTopWidth: 1, borderTopColor: colors.border },
+    editInput: {
+      backgroundColor: colors.elevated, borderRadius: 12,
+      borderWidth: 1, borderColor: colors.border,
+      paddingHorizontal: 14, paddingVertical: 12,
+      color: colors.textPrimary, fontFamily: 'Inter_400Regular', fontSize: 15,
+    },
     modRow: {
       flexDirection: 'row', justifyContent: 'space-between',
       paddingHorizontal: 20, paddingTop: 24, paddingBottom: 4,
@@ -267,6 +277,44 @@ export function PetDetailScreen() {
         },
       ],
     );
+  }
+
+  // ── Editing ──────────────────────────────────────────────────────────────────
+
+  function startEdit() {
+    if (!pet) return;
+    setEditName(pet.name);
+    setEditDesc(pet.description ?? '');
+    setEditing(true);
+  }
+
+  async function saveEdit() {
+    if (!pet) return;
+    const name = editName.trim();
+    if (!name) {
+      Alert.alert('Name required', 'Give this cat a name before saving.');
+      return;
+    }
+    setSavingEdit(true);
+    try {
+      // pets_update (migration 00006) already scopes this to the creator, so no
+      // ownership check is needed here beyond hiding the button.
+      const { error } = await supabase
+        .from('pets')
+        .update({ name, description: editDesc.trim() || null })
+        .eq('id', pet.id);
+      if (error) throw new Error(error.message);
+
+      setEditing(false);
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: petKeys.detail(petId) }),
+        qc.invalidateQueries({ queryKey: ['pets', 'bounds'] }),
+      ]);
+    } catch (err: any) {
+      Alert.alert('Error', err.message);
+    } finally {
+      setSavingEdit(false);
+    }
   }
 
   // ── Moderation ───────────────────────────────────────────────────────────────
@@ -427,13 +475,18 @@ export function PetDetailScreen() {
           </TouchableOpacity>
 
           {ownsPet && (
-            <TouchableOpacity onPress={handleDelete} disabled={deleting} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
-              <View style={styles.heroPill}>
-                {deleting
-                  ? <ActivityIndicator size="small" color="rgba(13,14,24,0.7)" />
-                  : <Text style={{ fontSize: 15 }}>🗑</Text>}
-              </View>
-            </TouchableOpacity>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              <TouchableOpacity onPress={startEdit} hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}>
+                <View style={styles.heroPill}><Text style={{ fontSize: 15 }}>✎</Text></View>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={handleDelete} disabled={deleting} hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}>
+                <View style={styles.heroPill}>
+                  {deleting
+                    ? <ActivityIndicator size="small" color="rgba(13,14,24,0.7)" />
+                    : <Text style={{ fontSize: 15 }}>🗑</Text>}
+                </View>
+              </TouchableOpacity>
+            </View>
           )}
         </View>
 
@@ -487,7 +540,51 @@ export function PetDetailScreen() {
           </View>
         )}
 
-        {pet.description && (
+        {editing && (
+          <View style={styles.section}>
+            <Text style={[t.label, { color: colors.textMuted, marginBottom: 8 }]}>Name</Text>
+            <TextInput
+              style={styles.editInput}
+              value={editName}
+              onChangeText={setEditName}
+              placeholder="e.g. Miso"
+              placeholderTextColor={colors.textMuted}
+              maxLength={60}
+            />
+            <Text style={[t.label, { color: colors.textMuted, marginTop: 16, marginBottom: 8 }]}>Description</Text>
+            <TextInput
+              style={[styles.editInput, { minHeight: 88, textAlignVertical: 'top' }]}
+              value={editDesc}
+              onChangeText={setEditDesc}
+              placeholder="Markings, temperament, where they usually sit…"
+              placeholderTextColor={colors.textMuted}
+              maxLength={500}
+              multiline
+            />
+            <View style={[styles.ctaRow, { marginTop: 14 }]}>
+              <TouchableOpacity
+                style={styles.ctaBtnOutline}
+                onPress={() => setEditing(false)}
+                disabled={savingEdit}
+                activeOpacity={0.8}
+              >
+                <Text style={[t.bodyMed, { color: colors.textPrimary }]}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.adoptBtn, { flex: 1, opacity: savingEdit ? 0.5 : 1 }]}
+                onPress={saveEdit}
+                disabled={savingEdit}
+                activeOpacity={0.85}
+              >
+                {savingEdit
+                  ? <ActivityIndicator color="#FFFFFF" />
+                  : <Text style={[t.bodyMed, { color: '#FFFFFF' }]}>Save</Text>}
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
+        {!editing && pet.description && (
           <View style={styles.section}>
             <Text style={[t.body, { color: colors.textSecondary, lineHeight: 24 }]}>{pet.description}</Text>
           </View>
@@ -521,6 +618,11 @@ export function PetDetailScreen() {
                   ) : null}
                   <Text style={[t.bodyMed, { color: colors.textPrimary }]}>{fmtDate(s.timestamp)}</Text>
                   <Text style={[t.caption, { color: colors.textSecondary, marginTop: 2 }]}>{fmtTime(s.timestamp)}</Text>
+                  {!!s.note && (
+                    <Text style={[t.caption, { color: colors.textPrimary, marginTop: 6, lineHeight: 18 }]}>
+                      “{s.note}”
+                    </Text>
+                  )}
                 </View>
               </View>
             ))

@@ -37,6 +37,7 @@ export function AddSightingScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [searching, setSearching]     = useState(false);
   const [uploading, setUploading]     = useState(false);
+  const [note, setNote]               = useState('');
 
   useEffect(() => {
     (async () => {
@@ -148,19 +149,19 @@ export function AddSightingScreen() {
     if (!photoUri) return;
     setUploading(true);
     try {
-      const [upload, authResult] = await Promise.all([
-        uploadPhoto(photoUri, 'sightings', Date.now().toString()),
-        supabase.auth.getUser(),
-      ]);
+      const upload = await uploadPhoto(photoUri, 'sightings', Date.now().toString());
 
-      await supabase.rpc('log_sighting', {
-        p_pet_id:         petId,
-        p_user_id:        authResult.data.user?.id ?? null,
-        p_lat:            pin.lat,
-        p_lng:            pin.lng,
-        p_photo_url:      upload.publicUrl,
+      // log_sighting takes its identity from auth.uid() as of migration 00006 —
+      // passing p_user_id here matched no function and failed the whole flow.
+      const { error } = await supabase.rpc('log_sighting', {
+        p_pet_id:          petId,
+        p_lat:             pin.lat,
+        p_lng:             pin.lng,
+        p_photo_url:       upload.publicUrl,
         p_photo_thumb_url: upload.thumbPublicUrl,
+        p_note:            note.trim() || null,
       });
+      if (error) throw new Error(error.message);
 
       await Promise.all([
         qc.invalidateQueries({ queryKey: petKeys.detail(petId) }),
@@ -195,6 +196,17 @@ export function AddSightingScreen() {
       backgroundColor: 'rgba(0,0,0,0.45)', paddingVertical: 8, alignItems: 'center' as const,
     },
     changeText: { color: '#fff', fontFamily: 'Inter_600SemiBold', fontSize: 13 },
+    noteRow: {
+      paddingHorizontal: 14, paddingTop: 10,
+      backgroundColor: colors.surface,
+    },
+    noteInput: {
+      minHeight: 40, maxHeight: 88, borderRadius: 10,
+      backgroundColor: colors.elevated, borderWidth: 1, borderColor: colors.border,
+      paddingHorizontal: 12, paddingVertical: 10,
+      color: colors.textPrimary, fontFamily: 'Inter_400Regular', fontSize: 14,
+      textAlignVertical: 'top' as const,
+    },
     searchRow: {
       flexDirection: 'row', alignItems: 'center', gap: 8,
       paddingHorizontal: 14, paddingVertical: 10,
@@ -270,6 +282,19 @@ export function AddSightingScreen() {
           </View>
         )}
       </TouchableOpacity>
+
+      {/* Optional note — what's different about the cat today */}
+      <View style={styles.noteRow}>
+        <TextInput
+          style={styles.noteInput}
+          placeholder="Add a note (optional) — e.g. limping, new collar"
+          placeholderTextColor={colors.textMuted}
+          value={note}
+          onChangeText={setNote}
+          maxLength={200}
+          multiline
+        />
+      </View>
 
       {/* Location search */}
       <View style={styles.searchRow}>
