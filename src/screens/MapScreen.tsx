@@ -649,6 +649,11 @@ export function MapScreen() {
               )}
             </View>
 
+            {/* "Mine" is parked, not removed. Identity today is the anonymous
+                session in SecureStore, so it belongs to the install rather than
+                the person: reinstall and your cats stop being yours. The filter
+                itself is fine and stays covered by petFilters.test.ts — restore
+                the chip once signing in links a durable identity. */}
             <View style={styles.chipRow}>
               <TouchableOpacity
                 style={[styles.chip, filters.adoptable && styles.chipOn]}
@@ -657,15 +662,6 @@ export function MapScreen() {
               >
                 <Text style={[t.caption, { color: filters.adoptable ? colors.rose : colors.textSecondary }]}>
                   ♥  Adoptable
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.chip, filters.mine && styles.chipOn]}
-                onPress={() => toggleFilter('mine')}
-                activeOpacity={0.7}
-              >
-                <Text style={[t.caption, { color: filters.mine ? colors.amber : colors.textSecondary }]}>
-                  Mine
                 </Text>
               </TouchableOpacity>
             </View>
