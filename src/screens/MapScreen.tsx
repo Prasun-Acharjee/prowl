@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Animated, PanResponder,
-  Platform, ActivityIndicator, ScrollView, TextInput,
+  Platform, ActivityIndicator, ScrollView, TextInput, Alert,
   Image as RNImage,
 } from 'react-native';
 import { Image } from 'expo-image';
@@ -9,6 +9,7 @@ import MapView, { Marker, PROVIDER_GOOGLE, Region } from 'react-native-maps';
 import Supercluster from 'supercluster';
 import * as Location from 'expo-location';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useQueryClient } from '@tanstack/react-query';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { useTheme, useColors } from '../context/ThemeContext';
@@ -19,6 +20,8 @@ import { Pet } from '../types';
 import { RootStackParamList } from '../navigation/RootNavigator';
 import { usePetsInViewport, usePetSearch } from '../hooks/usePets';
 import { applyFilters, PetFilters, NO_FILTERS } from '../lib/petFilters';
+import { Coords, distanceMeters, formatDistance, sortByDistance } from '../lib/geo';
+import { logSightingHere } from '../lib/sightings';
 import { getUserId } from '../lib/supabase';
 
 type Nav = StackNavigationProp<RootStackParamList, 'Map'>;
@@ -244,8 +247,12 @@ export function MapScreen() {
 
   const { colors, isDark } = useTheme();
 
+  const qc = useQueryClient();
+
   const [selected, setSelected]   = useState<Pet | null>(null);
-  const [userCoords, setUserCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const selectedRef = useRef<Pet | null>(null);
+  useEffect(() => { selectedRef.current = selected; }, [selected]);
+  const [userCoords, setUserCoords] = useState<Coords | null>(null);
   const [listOpen, setListOpen]   = useState(false);
   const [region, setRegion]       = useState<Region>(FALLBACK_REGION);
   const [queryBounds, setQueryBounds] = useState<[number, number, number, number] | null>(null);
@@ -255,8 +262,15 @@ export function MapScreen() {
   const listY     = useRef(new Animated.Value(LIST_FULL - LIST_PEEK)).current;
   const mapRef    = useRef<MapView>(null);
 
-  const [filters, setFilters] = useState<PetFilters>(NO_FILTERS);
-  const [search, setSearch]   = useState('');
+  const [filters, setFilters]     = useState<PetFilters>(NO_FILTERS);
+  const [search, setSearch]       = useState('');
+  const [sortNearest, setSortNearest] = useState(false);
+
+  // One-tap sighting from the pin sheet.
+  const [logging, setLogging]   = useState(false);
+  const [loggedId, setLoggedId] = useState<string | null>(null);
+  const loggedTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(loggedTimer.current), []);
 
   const { pets: viewportPets, loading } = usePetsInViewport(queryBounds);
   const { data: searchHits = [], isFetching: searching } = usePetSearch(search);
@@ -268,9 +282,17 @@ export function MapScreen() {
     () => applyFilters(viewportPets, filters, getUserId()),
     [viewportPets, filters],
   );
-  const listPets = useMemo(
-    () => (searchMode ? applyFilters(searchHits, filters, getUserId()) : pets),
-    [searchMode, searchHits, filters, pets],
+  // Nearest-first is opt-in and needs a fix to sort against; without one the
+  // chip is not offered at all, so it can never be on with nothing to do.
+  const listPets = useMemo(() => {
+    const base = searchMode ? applyFilters(searchHits, filters, getUserId()) : pets;
+    return sortNearest ? sortByDistance(base, userCoords) : base;
+  }, [searchMode, searchHits, filters, pets, sortNearest, userCoords]);
+
+  // Distance is a label, not a stored field: it changes as the user walks.
+  const distanceTo = useCallback(
+    (pet: Pet) => (userCoords ? formatDistance(distanceMeters(userCoords, pet)) : ''),
+    [userCoords],
   );
 
   function toggleFilter(key: keyof PetFilters) {
@@ -318,23 +340,51 @@ export function MapScreen() {
 
   // ── Location ────────────────────────────────────────────────────────────────
 
-  useEffect(() => {
-    (async () => {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        setQueryBounds(regionToBounds(FALLBACK_REGION));
-        return;
-      }
-      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-      const coords = { lat: loc.coords.latitude, lng: loc.coords.longitude };
-      setUserCoords(coords);
-      const r: Region = { latitude: coords.lat, longitude: coords.lng, latitudeDelta: 0.018, longitudeDelta: 0.018 };
-      setRegion(r);
-      setQueryBounds(regionToBounds(r));
-      mapRef.current?.animateToRegion(r, 800);
-    })();
-    return () => clearTimeout(debounceRef.current);
+  // Reads the device position. Split from the map move below because the two are
+  // needed separately: the recentre button has to be able to re-ask for a fix,
+  // since the first attempt may have been denied, and even when it wasn't the
+  // user has since walked somewhere.
+  const locate = useCallback(async (): Promise<Coords | null> => {
+    const { status } = await Location.requestForegroundPermissionsAsync();
+    if (status !== 'granted') {
+      // Fall back to a region rather than leaving the map with no bounds, but
+      // don't overwrite bounds the user has already panned to.
+      setQueryBounds(b => b ?? regionToBounds(FALLBACK_REGION));
+      return null;
+    }
+    const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+    const coords: Coords = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
+    setUserCoords(coords);
+    return coords;
   }, []);
+
+  const recenter = useCallback((coords: Coords) => {
+    const r: Region = { ...coords, latitudeDelta: 0.018, longitudeDelta: 0.018 };
+    setRegion(r);
+    setQueryBounds(regionToBounds(r));
+    mapRef.current?.animateToRegion(r, 800);
+  }, []);
+
+  useEffect(() => {
+    // A rejected fix leaves the fallback bounds in place; there is no useful
+    // thing to say about it before the user has asked for anything.
+    locate().then(c => { if (c) recenter(c); }).catch(() => {});
+    return () => clearTimeout(debounceRef.current);
+  }, [locate, recenter]);
+
+  const [locating, setLocating] = useState(false);
+  async function handleRecenter() {
+    setLocating(true);
+    try {
+      const coords = await locate();
+      if (coords) recenter(coords);
+      else Alert.alert('Location off', 'Prowl needs location permission to find cats around you.');
+    } catch {
+      Alert.alert('Location unavailable', "Couldn't get a fix on where you are. Try again in a moment.");
+    } finally {
+      setLocating(false);
+    }
+  }
 
   useEffect(() => {
     const peekY = Math.max(LIST_FULL - LIST_PEEK - insets.bottom, 0);
@@ -371,6 +421,35 @@ export function MapScreen() {
   function closePinSheet() {
     Animated.spring(pinSheetY, { toValue: 0, useNativeDriver: true, tension: 60, friction: 10 })
       .start(() => setSelected(null));
+  }
+
+  /**
+   * The sheet's primary action. This used to only close the sheet, which read
+   * as a button that did nothing — the sighting it promises is now actually
+   * written, at the device's position, without leaving the map.
+   */
+  async function handleISeeThisCat() {
+    if (!selected) return;
+    const petId = selected.id;
+    setLogging(true);
+    try {
+      await logSightingHere(petId);
+      await qc.invalidateQueries({ queryKey: ['pets'] });
+      // Confirm on the button itself, then get out of the way. An Alert for a
+      // one-tap action would cost a second tap to dismiss.
+      setLoggedId(petId);
+      loggedTimer.current = setTimeout(() => {
+        setLoggedId(null);
+        // Only dismiss if this is still the cat on screen — the user may have
+        // closed the sheet and opened another one inside the delay. Read through
+        // a ref rather than a state updater, which must stay side-effect free.
+        if (selectedRef.current?.id === petId) closePinSheet();
+      }, 1100);
+    } catch (err: any) {
+      Alert.alert('Could not log sighting', err.message);
+    } finally {
+      setLogging(false);
+    }
   }
 
   function handleMapPress() {
@@ -480,6 +559,14 @@ export function MapScreen() {
     catThumb:    { width: 44, height: 44, borderRadius: 22, overflow: 'hidden' as const },
     catInitial:  { fontFamily: 'Inter_700Bold', fontSize: 16, color: colors.onAmber },
     emptyState:  { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 12 },
+    recenterBtn: {
+      position: 'absolute' as const, right: 16, zIndex: 12,
+      width: 44, height: 44, borderRadius: 22,
+      alignItems: 'center' as const, justifyContent: 'center' as const,
+      backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border,
+      shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.18, shadowRadius: 6, elevation: 4,
+    },
   }), [colors, isDark]);
 
   // ── Render ──────────────────────────────────────────────────────────────────
@@ -550,6 +637,21 @@ export function MapScreen() {
         </View>
       </View>
 
+      {/* Recentre. Sits above the peeking list sheet so it clears the summary row,
+          and behind it (lower zIndex) so an open sheet simply covers it. */}
+      {!selected && (
+        <TouchableOpacity
+          style={[styles.recenterBtn, { bottom: insets.bottom + LIST_PEEK + 16 }]}
+          onPress={handleRecenter}
+          disabled={locating}
+          activeOpacity={0.8}
+        >
+          {locating
+            ? <ActivityIndicator size="small" color={colors.amber} />
+            : <Text style={{ fontSize: 18, color: colors.amber }}>⌖</Text>}
+        </TouchableOpacity>
+      )}
+
       {/* Per-pin quick-action card */}
       {selected && (
         <>
@@ -584,6 +686,7 @@ export function MapScreen() {
                 </View>
                 <Text style={[t.caption, { color: colors.textSecondary, marginTop: 3 }]}>
                   {selected.sightingCount} sightings · last seen {timeAgo(selected.lastSeenAt)}
+                  {!!distanceTo(selected) && ` · ${distanceTo(selected)} away`}
                 </Text>
               </View>
             </View>
@@ -594,8 +697,17 @@ export function MapScreen() {
               >
                 <Text style={[t.bodyMed, { color: colors.textPrimary }]}>View profile</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.btnAmber} onPress={closePinSheet}>
-                <Text style={[t.bodyMed, { color: colors.onAmber }]}>I see this cat</Text>
+              <TouchableOpacity
+                style={[styles.btnAmber, (logging || !!loggedId) && { opacity: 0.75 }]}
+                onPress={handleISeeThisCat}
+                disabled={logging || !!loggedId}
+                activeOpacity={0.85}
+              >
+                {logging
+                  ? <ActivityIndicator size="small" color={colors.onAmber} />
+                  : <Text style={[t.bodyMed, { color: colors.onAmber }]}>
+                      {loggedId === selected.id ? 'Logged ✓' : 'I see this cat'}
+                    </Text>}
               </TouchableOpacity>
             </View>
           </Animated.View>
@@ -664,6 +776,20 @@ export function MapScreen() {
                   ♥  Adoptable
                 </Text>
               </TouchableOpacity>
+
+              {/* Sorting, not filtering — offered only once there is a fix to
+                  sort against, so it can never be on with nothing to do. */}
+              {!!userCoords && (
+                <TouchableOpacity
+                  style={[styles.chip, sortNearest && styles.chipOn]}
+                  onPress={() => setSortNearest(v => !v)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[t.caption, { color: sortNearest ? colors.amber : colors.textSecondary }]}>
+                    ⌖  Nearest
+                  </Text>
+                </TouchableOpacity>
+              )}
             </View>
           </View>
 
@@ -691,6 +817,7 @@ export function MapScreen() {
                 <View style={{ flex: 1 }}>
                   <Text style={[t.bodyMed, { color: colors.textPrimary }]}>{pet.name}</Text>
                   <Text style={[t.caption, { color: colors.textSecondary, marginTop: 2 }]}>
+                    {!!distanceTo(pet) && `${distanceTo(pet)} · `}
                     Last seen {timeAgo(pet.lastSeenAt)} · {pet.sightingCount} sightings
                   </Text>
                 </View>

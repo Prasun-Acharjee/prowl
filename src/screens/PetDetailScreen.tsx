@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  ActivityIndicator, Alert, Linking, TextInput,
+  ActivityIndicator, Alert, Linking, TextInput, Platform, Share,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -10,11 +10,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { useQueryClient } from '@tanstack/react-query';
-import * as Location from 'expo-location';
 import { useTheme } from '../context/ThemeContext';
 import { type as t, fonts } from '../constants/typography';
 import { supabase, getUserId } from '../lib/supabase';
 import { deletePhoto } from '../lib/storage';
+import { logSightingHere } from '../lib/sightings';
+import { directionsUrl, mapsSearchUrl } from '../lib/geo';
 import { usePet, useSightings, petKeys } from '../hooks/usePets';
 import {
   REPORT_REASONS, ReportTarget, reportContent, blockUser, useRefreshHidden,
@@ -167,6 +168,11 @@ export function PetDetailScreen() {
     stat:      { flex: 1, alignItems: 'center' as const, paddingVertical: 20, gap: 4 },
     statBorder:{ borderLeftWidth: 1, borderRightWidth: 1, borderColor: colors.border },
     section:   { paddingHorizontal: 20, paddingTop: 24 },
+    directionsRow: {
+      flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+      paddingHorizontal: 20, paddingVertical: 16,
+      borderBottomWidth: 1, borderBottomColor: colors.border,
+    },
     timelineRow:      { flexDirection: 'row', gap: 14 },
     timelineLine:     { alignItems: 'center' as const, width: 12 },
     timelineDot:      { width: 10, height: 10, borderRadius: 5, marginTop: 5 },
@@ -389,23 +395,54 @@ export function PetDetailScreen() {
     if (!pet) return;
     setSaving(true);
     try {
-      // Sequential, not Promise.all: reading the position before the permission
-      // prompt resolves throws on a fresh install.
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') return;
-      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-
-      const { error } = await supabase.rpc('log_sighting', {
-        p_pet_id:  pet.id,
-        p_lat:     loc.coords.latitude,
-        p_lng:     loc.coords.longitude,
-      });
-      if (error) throw new Error(error.message);
+      await logSightingHere(pet.id);
       await qc.invalidateQueries({ queryKey: ['pets'] });
     } catch (err: any) {
       Alert.alert('Error', err.message);
     } finally {
       setSaving(false);
+    }
+  }
+
+  // ── Sharing / directions ─────────────────────────────────────────────────────
+
+  /**
+   * Opens the platform's own maps app at the last-seen point. This is the whole
+   * reason someone opens a profile on the street: knowing a cat is 300 m away is
+   * only useful if you can be told which way to walk.
+   */
+  async function handleDirections() {
+    if (!pet) return;
+    const platform = Platform.OS === 'ios' ? 'ios' : 'android';
+    const url = directionsUrl(pet.latitude, pet.longitude, pet.name, platform);
+    try {
+      await Linking.openURL(url);
+    } catch {
+      // No maps app (simulators, stripped Android images) — fall back to the web
+      // link, which every device can open.
+      await Linking.openURL(mapsSearchUrl(pet.latitude, pet.longitude)).catch(() => {
+        Alert.alert('Location', `${pet.latitude.toFixed(5)}, ${pet.longitude.toFixed(5)}`);
+      });
+    }
+  }
+
+  /**
+   * Shares a cat as text plus a maps link. Prowl has no web presence to link to,
+   * so the link points at the spot rather than at a profile — that opens for
+   * whoever receives it whether or not they have the app.
+   */
+  async function handleShare() {
+    if (!pet) return;
+    const lines = [
+      `${pet.name} — a community ${pet.species} on Prowl.`,
+      `Last seen ${timeAgo(pet.lastSeenAt).toLowerCase()} · ${pet.sightingCount} sighting${pet.sightingCount === 1 ? '' : 's'}.`,
+      pet.status === 'adoptable' ? `${pet.name} is looking for a home.` : null,
+      mapsSearchUrl(pet.latitude, pet.longitude),
+    ].filter(Boolean);
+    try {
+      await Share.share({ message: lines.join('\n') });
+    } catch {
+      // User dismissed the sheet, or no share targets exist. Nothing to say.
     }
   }
 
@@ -474,20 +511,26 @@ export function PetDetailScreen() {
             </View>
           </TouchableOpacity>
 
-          {ownsPet && (
-            <View style={{ flexDirection: 'row', gap: 8 }}>
-              <TouchableOpacity onPress={startEdit} hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}>
-                <View style={styles.heroPill}><Text style={{ fontSize: 15 }}>✎</Text></View>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={handleDelete} disabled={deleting} hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}>
-                <View style={styles.heroPill}>
-                  {deleting
-                    ? <ActivityIndicator size="small" color="rgba(13,14,24,0.7)" />
-                    : <Text style={{ fontSize: 15 }}>🗑</Text>}
-                </View>
-              </TouchableOpacity>
-            </View>
-          )}
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            {/* Sharing is for everyone; edit and delete are the creator's (00006). */}
+            <TouchableOpacity onPress={handleShare} hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}>
+              <View style={styles.heroPill}><Text style={{ fontSize: 15 }}>↗</Text></View>
+            </TouchableOpacity>
+            {ownsPet && (
+              <>
+                <TouchableOpacity onPress={startEdit} hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}>
+                  <View style={styles.heroPill}><Text style={{ fontSize: 15 }}>✎</Text></View>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={handleDelete} disabled={deleting} hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}>
+                  <View style={styles.heroPill}>
+                    {deleting
+                      ? <ActivityIndicator size="small" color="rgba(13,14,24,0.7)" />
+                      : <Text style={{ fontSize: 15 }}>🗑</Text>}
+                  </View>
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
         </View>
 
         <View style={styles.heroMeta}>
@@ -519,6 +562,13 @@ export function PetDetailScreen() {
             <Text style={[t.label, { color: colors.textMuted }]}>last sighting</Text>
           </View>
         </View>
+
+        {/* Walk-there row. Sits directly under the stats because "last seen 2h ago"
+            is the line that makes someone want to go and look. */}
+        <TouchableOpacity style={styles.directionsRow} onPress={handleDirections} activeOpacity={0.7}>
+          <Text style={[t.bodyMed, { color: colors.textPrimary }]}>📍  Last seen here</Text>
+          <Text style={[t.caption, { color: colors.amber }]}>Directions  ›</Text>
+        </TouchableOpacity>
 
         {pet.status === 'adoptable' && (
           <View style={styles.adoptBanner}>

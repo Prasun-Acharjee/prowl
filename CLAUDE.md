@@ -31,9 +31,20 @@ yarn android          # build + run on Android
 yarn ios              # build + run on iOS
 ```
 
-There is **no test suite, linter, or typecheck script** wired up. To sanity-check types
-manually: `yarn tsc --noEmit` (the app; `worker/` is excluded from the root tsconfig and
-has its own).
+There is **no test runner or linter** wired up. Types are checked with `yarn typecheck`
+(the app; `worker/` is excluded from the root tsconfig and has its own).
+
+The pure helpers in `src/lib` carry framework-free self-checks — plain `node:assert`
+scripts, run one at a time:
+
+```bash
+npx tsx src/lib/geo.test.ts
+npx tsx src/lib/petFilters.test.ts
+```
+
+Keep those files importable by node: no `react-native` imports in the module under test
+(that's why `directionsUrl` takes the platform as an argument instead of reading
+`Platform.OS`).
 
 Embedding worker (`cd worker`):
 
@@ -73,6 +84,9 @@ src/
     supabase.ts                  Supabase client + anonymous auth (ensureAuth)
     storage.ts                   Photo compress + dual upload (full + thumb)
     exif.ts                      GPS extraction from photo EXIF (iOS + Android shapes)
+    petFilters.ts                Map/list filter chips (pure; petFilters.test.ts)
+    geo.ts                       Haversine distance, distance labels, maps URLs (pure; geo.test.ts)
+    sightings.ts                 One-tap "I see this cat" — position + log_sighting
   context/ThemeContext.tsx       Light/dark theme provider (follows OS scheme)
   constants/                     colors, typography, mapStyle, legal text
   types/index.ts                 Domain types (Pet, Sighting, Species, PetStatus, PetMatch)
