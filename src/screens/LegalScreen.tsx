@@ -89,7 +89,7 @@ export function LegalScreen() {
           {[
             'Your GPS location, when logging a sighting or viewing the map',
             'Photos you choose to attach to a sighting',
-            'Cat names, descriptions, and notes you type',
+            'Pet names, descriptions, and notes you type',
             'An anonymous session token — no email or password needed',
           ].map((text, i) => (
             <View key={i} style={styles.bullet}>
@@ -131,7 +131,7 @@ export function LegalScreen() {
           <View style={styles.rowFirst}>
             <View style={{ gap: 2, flex: 1, paddingRight: 12 }}>
               <Text style={[t.bodyMed, { color: colors.textPrimary }]}>Delete sightings or photos</Text>
-              <Text style={[t.caption, { color: colors.textSecondary }]}>Open any cat profile → swipe or tap 🗑 on a photo</Text>
+              <Text style={[t.caption, { color: colors.textSecondary }]}>Open any pet profile → swipe or tap 🗑 on a photo</Text>
             </View>
           </View>
           <TouchableOpacity

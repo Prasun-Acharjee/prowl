@@ -387,7 +387,7 @@ async function loadReports() {
 
 const REASON_LABEL = {
   inappropriate: 'Inappropriate',
-  not_a_cat: 'Not a cat',
+  not_a_cat: 'Not a stray',
   spam: 'Spam',
   other: 'Other',
 };

@@ -6,7 +6,9 @@ export type ReportTarget = 'pet' | 'sighting';
 
 export const REPORT_REASONS: { key: ReportReason; label: string }[] = [
   { key: 'inappropriate', label: 'Inappropriate or offensive' },
-  { key: 'not_a_cat',     label: 'Not a cat / wrong animal' },
+  // Key kept for the 00008 CHECK constraint and existing rows; only the wording
+  // changes, now that dogs are a legitimate thing to log.
+  { key: 'not_a_cat',     label: 'Not a stray / wrong subject' },
   { key: 'spam',          label: 'Spam or duplicate' },
 ];
 

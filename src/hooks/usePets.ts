@@ -199,6 +199,11 @@ export function usePetsInViewport(bounds: Bounds | null) {
     pets,
     loading: query.isPending,
     error: query.error?.message ?? null,
+    // Exposed for pull-to-refresh. `isRefetching` rather than `isFetching` so the
+    // spinner does not appear for the background refetch that fires whenever the
+    // user pans the map.
+    refetch: query.refetch,
+    refreshing: query.isRefetching,
   };
 }
 

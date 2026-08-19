@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Animated, PanResponder,
-  Platform, ActivityIndicator, ScrollView, TextInput, Alert,
+  Platform, ActivityIndicator, ScrollView, TextInput, Alert, RefreshControl,
   Image as RNImage,
 } from 'react-native';
 import { Image } from 'expo-image';
@@ -16,10 +16,11 @@ import { useTheme, useColors } from '../context/ThemeContext';
 import { type as t } from '../constants/typography';
 import { DARK_MAP_STYLE } from '../constants/mapStyle';
 import { PetPin } from '../components/PetPin';
-import { Pet } from '../types';
+import { Pet, Species } from '../types';
 import { RootStackParamList } from '../navigation/RootNavigator';
 import { usePetsInViewport, usePetSearch } from '../hooks/usePets';
-import { applyFilters, PetFilters, NO_FILTERS } from '../lib/petFilters';
+import { applyFilters, toggleSpecies, PetFilters, NO_FILTERS } from '../lib/petFilters';
+import { freshnessLabel } from '../lib/freshness';
 import { Coords, distanceMeters, formatDistance, sortByDistance } from '../lib/geo';
 import { logSightingHere } from '../lib/sightings';
 import { getUserId } from '../lib/supabase';
@@ -222,12 +223,22 @@ const FALLBACK_REGION: Region = {
   latitudeDelta: 0.018, longitudeDelta: 0.018,
 };
 
+// Mirrors the CHECK constraint on pets.species (migration 00009). A species the
+// table cannot hold must not be offered as a filter.
+const SPECIES_CHIPS: { value: Species; label: string }[] = [
+  { value: 'cat', label: '🐱  Cats' },
+  { value: 'dog', label: '🐶  Dogs' },
+];
+
 const LIST_PEEK = 80;
 // Raised from 340 when the search field and filter chips were added: the header
 // grew by ~90px, and at the old height the list itself was down to three rows.
 // Peek is unchanged, so collapsed the sheet still shows just the summary row.
 const LIST_FULL = 430;
-const PIN_SHEET = 210;
+// How far the pin sheet travels to get off screen. Must exceed the sheet's real
+// height or a sliver stays visible when it is "closed"; raised from 210 when the
+// freshness line was added.
+const PIN_SHEET = 240;
 
 function timeAgo(iso: string) {
   const h = (Date.now() - new Date(iso).getTime()) / 3_600_000;
@@ -272,7 +283,7 @@ export function MapScreen() {
   const loggedTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(loggedTimer.current), []);
 
-  const { pets: viewportPets, loading } = usePetsInViewport(queryBounds);
+  const { pets: viewportPets, loading, refetch, refreshing } = usePetsInViewport(queryBounds);
   const { data: searchHits = [], isFetching: searching } = usePetSearch(search);
   const searchMode = search.trim().length >= 2;
 
@@ -288,6 +299,8 @@ export function MapScreen() {
     const base = searchMode ? applyFilters(searchHits, filters, getUserId()) : pets;
     return sortNearest ? sortByDistance(base, userCoords) : base;
   }, [searchMode, searchHits, filters, pets, sortNearest, userCoords]);
+
+  const selectedStaleLabel = selected ? freshnessLabel(selected.lastSeenAt) : null;
 
   // Distance is a label, not a stored field: it changes as the user walks.
   const distanceTo = useCallback(
@@ -428,7 +441,7 @@ export function MapScreen() {
    * as a button that did nothing — the sighting it promises is now actually
    * written, at the device's position, without leaving the map.
    */
-  async function handleISeeThisCat() {
+  async function handleISeeThisPet() {
     if (!selected) return;
     const petId = selected.id;
     setLogging(true);
@@ -543,7 +556,8 @@ export function MapScreen() {
       paddingHorizontal: 12,
       color: colors.textPrimary, fontFamily: 'Inter_400Regular', fontSize: 14,
     },
-    chipRow: { flexDirection: 'row', gap: 8, marginTop: 10 },
+    chipRow:        { marginTop: 10, flexGrow: 0 },
+    chipRowContent: { flexDirection: 'row', gap: 8, paddingRight: 20 },
     chip: {
       paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20,
       borderWidth: 1, borderColor: colors.border, backgroundColor: colors.elevated,
@@ -559,6 +573,10 @@ export function MapScreen() {
     catThumb:    { width: 44, height: 44, borderRadius: 22, overflow: 'hidden' as const },
     catInitial:  { fontFamily: 'Inter_700Bold', fontSize: 16, color: colors.onAmber },
     emptyState:  { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 12 },
+    staleBadge: {
+      paddingHorizontal: 7, paddingVertical: 2, borderRadius: 8,
+      backgroundColor: colors.elevated, borderWidth: 1, borderColor: colors.border,
+    },
     recenterBtn: {
       position: 'absolute' as const, right: 16, zIndex: 12,
       width: 44, height: 44, borderRadius: 22,
@@ -688,6 +706,11 @@ export function MapScreen() {
                   {selected.sightingCount} sightings · last seen {timeAgo(selected.lastSeenAt)}
                   {!!distanceTo(selected) && ` · ${distanceTo(selected)} away`}
                 </Text>
+                {!!selectedStaleLabel && (
+                  <Text style={[t.caption, { color: colors.rose, marginTop: 3 }]}>
+                    {selectedStaleLabel} — a sighting would help
+                  </Text>
+                )}
               </View>
             </View>
             <View style={styles.actions}>
@@ -699,14 +722,14 @@ export function MapScreen() {
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.btnAmber, (logging || !!loggedId) && { opacity: 0.75 }]}
-                onPress={handleISeeThisCat}
+                onPress={handleISeeThisPet}
                 disabled={logging || !!loggedId}
                 activeOpacity={0.85}
               >
                 {logging
                   ? <ActivityIndicator size="small" color={colors.onAmber} />
                   : <Text style={[t.bodyMed, { color: colors.onAmber }]}>
-                      {loggedId === selected.id ? 'Logged ✓' : 'I see this cat'}
+                      {loggedId === selected.id ? 'Logged ✓' : `I see this ${selected.species}`}
                     </Text>}
               </TouchableOpacity>
             </View>
@@ -714,7 +737,7 @@ export function MapScreen() {
         </>
       )}
 
-      {/* Cat list bottom sheet */}
+      {/* Pet list bottom sheet */}
       {!selected && (
         <Animated.View
           style={[
@@ -732,10 +755,10 @@ export function MapScreen() {
                   {searchMode
                     ? (searching ? 'Searching…' : `${listPets.length} match${listPets.length !== 1 ? 'es' : ''}`)
                     : loading
-                      ? 'Finding cats…'
+                      ? 'Finding pets…'
                       : listPets.length === 0
-                        ? 'No cats in this area'
-                        : `${listPets.length} cat${listPets.length !== 1 ? 's' : ''} in view`}
+                        ? 'Nothing in this area'
+                        : `${listPets.length} pet${listPets.length !== 1 ? 's' : ''} in view`}
                 </Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.logBtn} onPress={() => nav.navigate('Camera')} activeOpacity={0.8}>
@@ -746,7 +769,7 @@ export function MapScreen() {
             <View style={styles.searchRow}>
               <TextInput
                 style={styles.searchInput}
-                placeholder="Search cats by name…"
+                placeholder="Search by name…"
                 placeholderTextColor={colors.textMuted}
                 value={search}
                 onChangeText={setSearch}
@@ -761,12 +784,22 @@ export function MapScreen() {
               )}
             </View>
 
-            {/* "Mine" is parked, not removed. Identity today is the anonymous
+            {/* Horizontal scroll rather than wrapping: the row holds enough chips
+                to overflow a narrow phone, and a second line would eat into the
+                list, which is the point of the sheet.
+
+                "Mine" is parked, not removed. Identity today is the anonymous
                 session in SecureStore, so it belongs to the install rather than
-                the person: reinstall and your cats stop being yours. The filter
+                the person: reinstall and your pets stop being yours. The filter
                 itself is fine and stays covered by petFilters.test.ts — restore
                 the chip once signing in links a durable identity. */}
-            <View style={styles.chipRow}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.chipRow}
+              contentContainerStyle={styles.chipRowContent}
+              keyboardShouldPersistTaps="handled"
+            >
               <TouchableOpacity
                 style={[styles.chip, filters.adoptable && styles.chipOn]}
                 onPress={() => toggleFilter('adoptable')}
@@ -776,6 +809,22 @@ export function MapScreen() {
                   ♥  Adoptable
                 </Text>
               </TouchableOpacity>
+
+              {SPECIES_CHIPS.map(sp => {
+                const on = filters.species.includes(sp.value);
+                return (
+                  <TouchableOpacity
+                    key={sp.value}
+                    style={[styles.chip, on && styles.chipOn]}
+                    onPress={() => setFilters(f => toggleSpecies(f, sp.value))}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[t.caption, { color: on ? colors.amber : colors.textSecondary }]}>
+                      {sp.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
 
               {/* Sorting, not filtering — offered only once there is a fix to
                   sort against, so it can never be on with nothing to do. */}
@@ -790,10 +839,26 @@ export function MapScreen() {
                   </Text>
                 </TouchableOpacity>
               )}
-            </View>
+            </ScrollView>
           </View>
 
-          <ScrollView scrollEnabled={listOpen} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+          <ScrollView
+            scrollEnabled={listOpen}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            refreshControl={
+              // Search results come from a separate query keyed on the text, so
+              // pulling there would refetch the viewport the user cannot see.
+              searchMode ? undefined : (
+                <RefreshControl
+                  refreshing={refreshing}
+                  onRefresh={refetch}
+                  tintColor={colors.amber}
+                  colors={[colors.amber]}
+                />
+              )
+            }
+          >
             {listPets.map((pet, i) => (
               <TouchableOpacity
                 key={pet.id}
@@ -815,7 +880,18 @@ export function MapScreen() {
                   </View>
                 )}
                 <View style={{ flex: 1 }}>
-                  <Text style={[t.bodyMed, { color: colors.textPrimary }]}>{pet.name}</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Text style={[t.bodyMed, { color: colors.textPrimary }]} numberOfLines={1}>
+                      {pet.name}
+                    </Text>
+                    {/* Only pets nobody has logged in a week carry this, so it
+                        stays a signal rather than decoration on every row. */}
+                    {!!freshnessLabel(pet.lastSeenAt) && (
+                      <View style={styles.staleBadge}>
+                        <Text style={[t.label, { color: colors.textSecondary }]}>needs a check-in</Text>
+                      </View>
+                    )}
+                  </View>
                   <Text style={[t.caption, { color: colors.textSecondary, marginTop: 2 }]}>
                     {!!distanceTo(pet) && `${distanceTo(pet)} · `}
                     Last seen {timeAgo(pet.lastSeenAt)} · {pet.sightingCount} sightings
@@ -828,10 +904,10 @@ export function MapScreen() {
               <View style={styles.emptyState}>
                 <Text style={[t.body, { color: colors.textMuted, textAlign: 'center' }]}>
                   {searchMode
-                    ? `No cats named “${search.trim()}”.`
-                    : filters.adoptable || filters.mine
-                      ? 'No cats here match those filters.'
-                      : `No cats spotted nearby yet.\nUse the button above to add one.`}
+                    ? `Nothing named “${search.trim()}”.`
+                    : filters.adoptable || filters.mine || filters.species.length > 0
+                      ? 'Nothing here matches those filters.'
+                      : `No pets spotted nearby yet.\nUse the button above to add one.`}
                 </Text>
               </View>
             )}

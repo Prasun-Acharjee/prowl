@@ -283,7 +283,7 @@ export function AddSightingScreen() {
         )}
       </TouchableOpacity>
 
-      {/* Optional note — what's different about the cat today */}
+      {/* Optional note — what's different about the animal today */}
       <View style={styles.noteRow}>
         <TextInput
           style={styles.noteInput}

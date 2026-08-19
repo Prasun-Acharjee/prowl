@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
   ActivityIndicator, Alert, Linking, TextInput, Platform, Share,
@@ -10,12 +10,14 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { useQueryClient } from '@tanstack/react-query';
+import * as Location from 'expo-location';
 import { useTheme } from '../context/ThemeContext';
 import { type as t, fonts } from '../constants/typography';
 import { supabase, getUserId } from '../lib/supabase';
 import { deletePhoto } from '../lib/storage';
 import { logSightingHere } from '../lib/sightings';
 import { directionsUrl, mapsSearchUrl } from '../lib/geo';
+import { freshnessLabel } from '../lib/freshness';
 import { usePet, useSightings, petKeys } from '../hooks/usePets';
 import {
   REPORT_REASONS, ReportTarget, reportContent, blockUser, useRefreshHidden,
@@ -123,6 +125,32 @@ export function PetDetailScreen() {
   const [editName, setEditName]           = useState('');
   const [editDesc, setEditDesc]           = useState('');
   const [savingEdit, setSavingEdit]       = useState(false);
+  const [placeName, setPlaceName]         = useState<string | null>(null);
+
+  // "Last seen here" says nothing a map pin does not. A street or neighbourhood
+  // name is what someone would actually repeat to a friend, so resolve one —
+  // best-effort, and the row reads fine without it if the lookup fails or the
+  // point is somewhere with no address at all.
+  const lat = pet?.latitude;
+  const lng = pet?.longitude;
+  useEffect(() => {
+    if (lat === undefined || lng === undefined) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { status } = await Location.getForegroundPermissionsAsync();
+        // Don't prompt from here: the user came to read a profile, and a
+        // permission dialog for a cosmetic label would be an ambush.
+        if (status !== 'granted') return;
+        const [r] = await Location.reverseGeocodeAsync({ latitude: lat, longitude: lng });
+        if (cancelled || !r) return;
+        setPlaceName(r.street ?? r.district ?? r.subregion ?? r.city ?? null);
+      } catch {
+        // Offline, or no geocoder on the platform. The row keeps its plain copy.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [lat, lng]);
 
   // Ownership drives what's deletable (migration 00006). Hide the buttons rather
   // than letting RLS turn them into errors.
@@ -168,6 +196,10 @@ export function PetDetailScreen() {
     stat:      { flex: 1, alignItems: 'center' as const, paddingVertical: 20, gap: 4 },
     statBorder:{ borderLeftWidth: 1, borderRightWidth: 1, borderColor: colors.border },
     section:   { paddingHorizontal: 20, paddingTop: 24 },
+    staleStrip: {
+      marginHorizontal: 20, marginTop: 20, padding: 14, borderRadius: 14,
+      backgroundColor: colors.elevated, borderWidth: 1, borderColor: colors.border,
+    },
     directionsRow: {
       flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
       paddingHorizontal: 20, paddingVertical: 16,
@@ -219,7 +251,7 @@ export function PetDetailScreen() {
   async function handleDelete() {
     Alert.alert(
       `Remove ${pet?.name}?`,
-      'This deletes all sightings and photos for this cat. This cannot be undone.',
+      `This deletes all sightings and photos for this ${pet?.species ?? 'pet'}. This cannot be undone.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -298,7 +330,7 @@ export function PetDetailScreen() {
     if (!pet) return;
     const name = editName.trim();
     if (!name) {
-      Alert.alert('Name required', 'Give this cat a name before saving.');
+      Alert.alert('Name required', `Give this ${pet.species} a name before saving.`);
       return;
     }
     setSavingEdit(true);
@@ -354,12 +386,12 @@ export function PetDetailScreen() {
   function handleBlock() {
     const uploader = pet?.createdBy;
     if (!uploader) {
-      Alert.alert('Not available', 'We do not know who added this cat, so there is nobody to block.');
+      Alert.alert('Not available', 'We do not know who added this pet, so there is nobody to block.');
       return;
     }
     Alert.alert(
       'Block this contributor?',
-      "You'll stop seeing every cat and photo they've added. This only affects what you see.",
+      "You'll stop seeing every pet and photo they've added. This only affects what you see.",
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -486,6 +518,8 @@ export function PetDetailScreen() {
 
   if (!pet) return null;
 
+  const staleLabel = freshnessLabel(pet.lastSeenAt);
+
   return (
     <View style={styles.root}>
       {/* Hero */}
@@ -563,10 +597,25 @@ export function PetDetailScreen() {
           </View>
         </View>
 
+        {/* Nobody has logged this pet in a while. Phrased as a gap in reporting,
+            and paired with the action that closes it — the CTA below. */}
+        {!!staleLabel && (
+          <View style={styles.staleStrip}>
+            <Text style={[t.bodyMed, { color: colors.textPrimary }]}>
+              👀  {staleLabel}
+            </Text>
+            <Text style={[t.caption, { color: colors.textSecondary, marginTop: 4 }]}>
+              If you spot {pet.name}, logging it keeps the map honest.
+            </Text>
+          </View>
+        )}
+
         {/* Walk-there row. Sits directly under the stats because "last seen 2h ago"
             is the line that makes someone want to go and look. */}
         <TouchableOpacity style={styles.directionsRow} onPress={handleDirections} activeOpacity={0.7}>
-          <Text style={[t.bodyMed, { color: colors.textPrimary }]}>📍  Last seen here</Text>
+          <Text style={[t.bodyMed, { color: colors.textPrimary }]} numberOfLines={1}>
+            📍  {placeName ? `Last seen near ${placeName}` : 'Last seen here'}
+          </Text>
           <Text style={[t.caption, { color: colors.amber }]}>Directions  ›</Text>
         </TouchableOpacity>
 
@@ -679,11 +728,11 @@ export function PetDetailScreen() {
           )}
         </View>
 
-        {/* Moderation. Hidden on your own cat — you can delete it instead. */}
+        {/* Moderation. Hidden on your own pet — you can delete it instead. */}
         {!ownsPet && (
           <View style={styles.modRow}>
-            <TouchableOpacity onPress={() => handleReport('pet', pet.id, 'cat')} activeOpacity={0.6}>
-              <Text style={[t.caption, { color: colors.textMuted }]}>⚑  Report this cat</Text>
+            <TouchableOpacity onPress={() => handleReport('pet', pet.id, pet.species)} activeOpacity={0.6}>
+              <Text style={[t.caption, { color: colors.textMuted }]}>⚑  Report this {pet.species}</Text>
             </TouchableOpacity>
             {!!pet.createdBy && pet.createdBy !== uid && (
               <TouchableOpacity onPress={handleBlock} activeOpacity={0.6}>

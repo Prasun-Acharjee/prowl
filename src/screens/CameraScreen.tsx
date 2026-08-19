@@ -15,10 +15,19 @@ import { type as t } from '../constants/typography';
 import { supabase } from '../lib/supabase';
 import { uploadPhoto } from '../lib/storage';
 import { RootStackParamList } from '../navigation/RootNavigator';
+import { Species } from '../types';
 
 type Nav = StackNavigationProp<RootStackParamList, 'Camera'>;
 
-type Screen = 'capture' | 'uploading' | 'candidates' | 'new-cat';
+type Screen = 'capture' | 'uploading' | 'candidates' | 'new-pet';
+
+// The species a new pet can be. `pets.species` is constrained to exactly this
+// set by migration 00009, so adding to one without the other will be rejected
+// by the insert rather than silently stored.
+const SPECIES: { value: Species; label: string; glyph: string }[] = [
+  { value: 'cat', label: 'Cat', glyph: '🐱' },
+  { value: 'dog', label: 'Dog', glyph: '🐶' },
+];
 
 const SEARCH_RADIUS_M = 300;
 
@@ -50,14 +59,22 @@ export function CameraScreen() {
   const [uploadedThumbUrl, setUploadedThumbUrl] = useState<string | null>(null);
   const [coords, setCoords]       = useState<{ lat: number; lng: number } | null>(null);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
-  const [newCatName, setNewCatName] = useState('');
+  const [newPetName, setNewPetName] = useState('');
+  // Cats are the overwhelming majority of what gets logged, so that is the
+  // default; the picker exists because the schema and the map have always
+  // supported dogs and nothing in the app could create one.
+  const [species, setSpecies]     = useState<Species>('cat');
   const [saving, setSaving]       = useState(false);
-  const [locationName, setLocationName] = useState('');
-  // Optional, and shared by every candidate: typing a note then tapping a cat
+  const [placePhrase, setPlacePhrase] = useState<string | null>(null);
+  // Optional, and shared by every candidate: typing a note then tapping a pet
   // keeps logging a single tap rather than adding a confirm step.
   const [note, setNote]           = useState('');
 
   const photoCoords = useRef<{ lat: number; lng: number } | null>(null);
+
+  const noun = species === 'dog' ? 'Dog' : 'Cat';
+  // What the pet is called when the user leaves the name blank.
+  const fallbackName = placePhrase ? `${noun} ${placePhrase}` : `Community ${noun.toLowerCase()}`;
 
   useEffect(() => {
     Location.requestForegroundPermissionsAsync().then(({ status }) => {
@@ -155,25 +172,27 @@ export function CameraScreen() {
     }
   }
 
-  async function defaultNameFromCoords(lat: number, lng: number): Promise<string> {
+  /**
+   * The place half of an auto-generated name — "near Church St", "in Bandra".
+   * Kept separate from the species noun so that flipping the picker relabels
+   * instantly instead of costing another reverse-geocode round trip.
+   */
+  async function placePhraseFromCoords(lat: number, lng: number): Promise<string | null> {
     try {
       const [result] = await Location.reverseGeocodeAsync({ latitude: lat, longitude: lng });
       if (result) {
-        if (result.street) return `Cat near ${result.street}`;
+        if (result.street) return `near ${result.street}`;
         const area = result.district ?? result.subregion ?? result.city;
-        if (area) return `Cat in ${area}`;
+        if (area) return `in ${area}`;
       }
     } catch {}
-    return 'Community cat';
+    return null;
   }
 
-  async function handleNewCat() {
+  async function handleNewPet() {
     const c = photoCoords.current ?? coords;
-    if (c) {
-      const name = await defaultNameFromCoords(c.lat, c.lng);
-      setLocationName(name);
-    }
-    setScreen('new-cat');
+    if (c) setPlacePhrase(await placePhraseFromCoords(c.lat, c.lng));
+    setScreen('new-pet');
   }
 
   async function createNewPet() {
@@ -181,12 +200,12 @@ export function CameraScreen() {
     if (!c) return;
     setSaving(true);
     try {
-      const name = newCatName.trim() || locationName || 'Community cat';
+      const name = newPetName.trim() || fallbackName;
 
       const { data: pet, error } = await supabase
         .from('pets')
         .insert({
-          name, species: 'cat',
+          name, species,
           location:             `SRID=4326;POINT(${c.lng} ${c.lat})`,
           thumbnail_url:        uploadedUrl,
           thumbnail_small_url:  uploadedThumbUrl,
@@ -256,11 +275,18 @@ export function CameraScreen() {
       borderWidth: 1, borderColor: colors.amberBorder,
       maxWidth: 120, flexShrink: 0 as any,
     },
-    newCatRow: {
+    newPetRow: {
       marginTop: 16, paddingVertical: 14, paddingHorizontal: 16,
       backgroundColor: colors.elevated, borderRadius: 12, borderWidth: 1, borderColor: colors.border,
     },
-    newCatPanel: { flex: 1, paddingHorizontal: 20, paddingTop: 32, backgroundColor: colors.surface },
+    newPetPanel: { flex: 1, paddingHorizontal: 20, paddingTop: 32, backgroundColor: colors.surface },
+    speciesRow:  { flexDirection: 'row', gap: 10 },
+    speciesChip: {
+      flex: 1, flexDirection: 'row', alignItems: 'center' as const, justifyContent: 'center' as const,
+      gap: 8, paddingVertical: 14, borderRadius: 14,
+      backgroundColor: colors.elevated, borderWidth: 1, borderColor: colors.border,
+    },
+    speciesChipOn: { backgroundColor: colors.amberFaint, borderColor: colors.amberBorder },
     noteInput: {
       backgroundColor: colors.elevated, borderRadius: 10,
       borderWidth: 1, borderColor: colors.border,
@@ -288,20 +314,20 @@ export function CameraScreen() {
           <Text style={[t.body, { color: colors.textSecondary }]}>Cancel</Text>
         </TouchableOpacity>
         <Text style={[t.bodyMed, { color: colors.textPrimary }]}>
-          {screen === 'new-cat' ? 'New cat' : 'Log a sighting'}
+          {screen === 'new-pet' ? `New ${noun.toLowerCase()}` : 'Log a sighting'}
         </Text>
         <View style={{ width: 52 }} />
       </View>
 
       {/* Viewfinder */}
-      {screen !== 'new-cat' && (
+      {screen !== 'new-pet' && (
         <View style={styles.viewfinder}>
           {capturedUri ? (
             <Image source={{ uri: capturedUri }} style={StyleSheet.absoluteFill} contentFit="cover" />
           ) : (
             <View style={styles.viewfinderPlaceholder}>
               <Text style={{ fontSize: 52 }}>🐱</Text>
-              <Text style={[t.body, { color: colors.textMuted, marginTop: 10 }]}>Photograph the cat</Text>
+              <Text style={[t.body, { color: colors.textMuted, marginTop: 10 }]}>Photograph the stray</Text>
             </View>
           )}
           {screen === 'uploading' && (
@@ -330,7 +356,7 @@ export function CameraScreen() {
       {screen === 'candidates' && (
         <View style={[styles.matchPanel, { paddingBottom: insets.bottom + 16 }]}>
           <Text style={[t.label, { color: colors.textMuted, marginBottom: 14 }]}>
-            {candidates.length > 0 ? 'Nearest cats first' : 'No known cats in range'}
+            {candidates.length > 0 ? 'Nearest pets first' : 'No known pets in range'}
           </Text>
           <TextInput
             style={styles.noteInput}
@@ -358,8 +384,8 @@ export function CameraScreen() {
               </TouchableOpacity>
             ))}
           </ScrollView>
-          <TouchableOpacity style={styles.newCatRow} onPress={handleNewCat}>
-            <Text style={[t.bodyMed, { color: colors.textPrimary }]}>+ New cat</Text>
+          <TouchableOpacity style={styles.newPetRow} onPress={handleNewPet}>
+            <Text style={[t.bodyMed, { color: colors.textPrimary }]}>+ New pet</Text>
             <Text style={[t.caption, { color: colors.textMuted, marginTop: 2 }]}>
               Not in the list? Create a new entry.
             </Text>
@@ -370,25 +396,46 @@ export function CameraScreen() {
         </View>
       )}
 
-      {/* New cat entry */}
-      {screen === 'new-cat' && (
-        <View style={[styles.newCatPanel, { paddingBottom: insets.bottom + 24 }]}>
-          <Text style={[t.label, { color: colors.textMuted, marginBottom: 4 }]}>Name this cat</Text>
+      {/* New pet entry */}
+      {screen === 'new-pet' && (
+        <View style={[styles.newPetPanel, { paddingBottom: insets.bottom + 24 }]}>
+          <Text style={[t.label, { color: colors.textMuted, marginBottom: 10 }]}>What is it?</Text>
+          <View style={styles.speciesRow}>
+            {SPECIES.map(sp => {
+              const on = species === sp.value;
+              return (
+                <TouchableOpacity
+                  key={sp.value}
+                  style={[styles.speciesChip, on && styles.speciesChipOn]}
+                  onPress={() => setSpecies(sp.value)}
+                  activeOpacity={0.75}
+                >
+                  <Text style={{ fontSize: 18 }}>{sp.glyph}</Text>
+                  <Text style={[t.bodyMed, { color: on ? colors.amber : colors.textSecondary }]}>
+                    {sp.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          <Text style={[t.label, { color: colors.textMuted, marginTop: 22, marginBottom: 4 }]}>
+            Name this {noun.toLowerCase()}
+          </Text>
           <Text style={[t.caption, { color: colors.textMuted, marginBottom: 14 }]}>
             Optional — location will be used if left blank
           </Text>
           <TextInput
             style={styles.nameInput}
-            placeholder="e.g. Miso"
+            placeholder={species === 'dog' ? 'e.g. Bruno' : 'e.g. Miso'}
             placeholderTextColor={colors.textMuted}
-            value={newCatName}
-            onChangeText={setNewCatName}
-            autoFocus
+            value={newPetName}
+            onChangeText={setNewPetName}
             returnKeyType="done"
           />
-          {!newCatName.trim() && locationName ? (
+          {!newPetName.trim() ? (
             <Text style={[t.caption, { color: colors.textSecondary, marginTop: -8, marginBottom: 16 }]}>
-              Will be added as "{locationName}"
+              Will be added as "{fallbackName}"
             </Text>
           ) : null}
           <TouchableOpacity

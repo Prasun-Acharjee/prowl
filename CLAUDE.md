@@ -9,16 +9,21 @@ Anyone can snap a photo of a stray, and the app tries to match it to a pet alrea
 nearby (so repeat sightings accumulate on one animal) or create a new pet. Owners/shelters
 can flag pets as adoptable from a separate admin dashboard.
 
-The repo contains **four cooperating pieces**:
+The repo contains **three cooperating pieces**:
 
 | Piece | Path | Stack | Role |
 |-------|------|-------|------|
 | Mobile app | `App.tsx`, `src/` | Expo / React Native (TypeScript) | The product — map, camera, sighting flow |
-| Backend | `supabase/` | Supabase (Postgres + PostGIS + pgvector) | Data, auth, storage, RPCs, RLS |
-| Admin dashboard | `dashboard/` | Vanilla JS + supabase-js UMD + Leaflet | Owner/shelter tool to manage adoption status |
-| Embedding worker | `worker/` | Cloudflare Worker + Workers AI (CLIP) | Generates image embeddings for photo matching |
+| Backend | `supabase/` | Supabase (Postgres + PostGIS) | Data, auth, storage, RPCs, RLS |
+| Admin dashboard | `dashboard/` | Vanilla JS + supabase-js UMD + Leaflet | Owner/shelter tool to manage adoption + reports |
 
 Everything is written in TypeScript except the dashboard (plain JS) and SQL migrations.
+
+> There used to be a fourth piece, a Cloudflare Worker generating CLIP embeddings for visual
+> photo matching. It is gone — the model it depended on is no longer available to the
+> account, and no image-embedding replacement is offered. Migration `00007` dropped the
+> column, index and RPC. **Candidate matching is proximity-only**, which is all it ever
+> actually did in production: no pet ever received an embedding.
 
 ## Commands
 
@@ -31,8 +36,7 @@ yarn android          # build + run on Android
 yarn ios              # build + run on iOS
 ```
 
-There is **no test runner or linter** wired up. Types are checked with `yarn typecheck`
-(the app; `worker/` is excluded from the root tsconfig and has its own).
+There is **no test runner or linter** wired up. Types are checked with `yarn typecheck`.
 
 The pure helpers in `src/lib` carry framework-free self-checks — plain `node:assert`
 scripts, run one at a time:
@@ -40,18 +44,12 @@ scripts, run one at a time:
 ```bash
 npx tsx src/lib/geo.test.ts
 npx tsx src/lib/petFilters.test.ts
+npx tsx src/lib/freshness.test.ts
 ```
 
 Keep those files importable by node: no `react-native` imports in the module under test
 (that's why `directionsUrl` takes the platform as an argument instead of reading
 `Platform.OS`).
-
-Embedding worker (`cd worker`):
-
-```bash
-yarn dev              # wrangler dev
-yarn deploy           # wrangler deploy
-```
 
 Admin dashboard: static files in `dashboard/` — serve them with any static host
 (e.g. `python3 -m http.server` from that dir). No build step.
@@ -69,8 +67,9 @@ EAS build profiles live in `eas.json` (`preview` → APK, `production` → app b
 - The **Supabase anon key is public by design** — it ships inside the mobile bundle and is
   hard-coded in `dashboard/app.js`. Never treat it as a secret. Privileged writes are
   guarded server-side (see the adoption-guard trigger below).
-- The worker uses `SUPABASE_URL` and `SUPABASE_SERVICE_KEY` as **wrangler secrets**
-  (`wrangler secret put ...`) — the service key must never appear in client code or the repo.
+- There is **no service-role key anywhere in this repo**, and none should ever be added: both
+  clients are public surfaces. Privileged operations run as the admin user or in the SQL
+  editor.
 
 ## Mobile app architecture (`src/`)
 
@@ -86,6 +85,7 @@ src/
     exif.ts                      GPS extraction from photo EXIF (iOS + Android shapes)
     petFilters.ts                Map/list filter chips (pure; petFilters.test.ts)
     geo.ts                       Haversine distance, distance labels, maps URLs (pure; geo.test.ts)
+    freshness.ts                 How stale a pet's last sighting is (pure; freshness.test.ts)
     sightings.ts                 One-tap "I see this cat" — position + log_sighting
   context/ThemeContext.tsx       Light/dark theme provider (follows OS scheme)
   constants/                     colors, typography, mapStyle, legal text
@@ -141,10 +141,10 @@ written to be idempotent and safe to re-run** (`if not exists`, `drop ... if exi
 Migration history (read these before touching schema):
 
 - `00001_init.sql` — core schema. `pets` and `sightings` tables with `geography(Point,4326)`
-  columns + GiST indexes, a `vector(512)` embedding column + ivfflat index, RLS policies
-  (public read; `authenticated` insert/update/delete), the `pet-photos` public storage
-  bucket, the `pets_geo`/`sightings_geo` decode views, and the key RPCs:
-  `nearby_pets`, `match_pets` (embedding + distance search), `log_sighting`.
+  columns + GiST indexes, RLS policies (public read; `authenticated` insert/update/delete),
+  the `pet-photos` public storage bucket, the `pets_geo`/`sightings_geo` decode views, and
+  the key RPCs: `nearby_pets`, `log_sighting`. (It also created the `vector(512)` embedding
+  column and `match_pets`; both were dropped in 00007.)
 - `00002_thumbnails.sql` — adds `thumbnail_small_url`, storage delete policy, and extends
   `log_sighting` with `p_photo_thumb_url`.
 - `00003_sightings_update.sql` — adds the missing `sightings` UPDATE RLS policy.
@@ -154,6 +154,25 @@ Migration history (read these before touching schema):
   users can still update pets (sighting logging, thumbnail sync), but **only the admin
   email / service-role / dashboard SQL editor may change `status` or `adoption_contact`**.
   Adoption is admin-only by design — there is no in-app write path for it.
+- `00006_ownership.sql` — adds `pets.created_by` / `sightings.user_id` and rewrites the RLS
+  policies so **a row can only be updated or deleted by whoever created it**. `log_sighting`
+  takes its identity from `auth.uid()` from here on, so it no longer accepts `p_user_id` —
+  passing it matches no function and fails the whole call. Also adds `clear_sighting_photo`,
+  which nulls a photo and repairs the parent pet's thumbnails in one authorized step.
+  Rows predating this have a null creator and are admin-only to delete.
+- `00007_drop_embeddings.sql` — drops the `embedding` column, its ivfflat index and
+  `match_pets`. See the note at the top of this file.
+- `00008_moderation.sql` — `reports` table (reason CHECK: `inappropriate` | `not_a_cat` |
+  `spam` | `other`) and per-user hide lists behind the in-app report/block flow, required by
+  Google Play's UGC policy. Reports deliberately carry **no foreign key to their target**:
+  deleting an offending pet must not erase the record that it was reported. Hiding is applied
+  client-side (`useModeration`) because pets are world-readable by design — it is
+  presentation, not a security boundary.
+- `00009_species.sql` — CHECK constraint pinning `species` to `cat`/`dog`. 00001 left it an
+  unconstrained `text` because only cats could be added; the camera now offers a choice, so
+  the column is real input. Adding a species means the migration, `Species` in
+  `types/index.ts`, `SPECIES` in `CameraScreen`, and `SPECIES_CHIPS` in `MapScreen` — all
+  four, or the insert is rejected.
 
 **Gotchas when changing the schema:**
 
@@ -163,18 +182,6 @@ Migration history (read these before touching schema):
 - If you add a column that clients read, expose it through `pets_geo`/`sightings_geo` **and**
   the relevant RPC, then add it to the row interface + mapper in `usePets.ts`. The mapper
   uses `?? default` fallbacks so older clients tolerate pre-migration schemas — keep that.
-
-## Embedding worker (`worker/`)
-
-Triggered by a **Supabase database webhook on `sightings` INSERT**. It fetches the sighting
-photo, runs CLIP ViT-B/32 via Cloudflare Workers AI to get a 512-dim embedding, and PATCHes
-it onto the parent `pets` row (service key). Future `match_pets()` calls can then rank by
-visual similarity. It no-ops if the sighting has no photo. Config in `worker/wrangler.toml`
-(the `AI` binding); secrets set via `wrangler secret put`.
-
-> Note: `match_pets` (embedding search) is wired end-to-end in SQL + worker, but the mobile
-> Camera flow currently matches on **geographic proximity only** (`nearby_pets`). Embeddings
-> populate in the background for future use.
 
 ## Admin dashboard (`dashboard/`)
 
