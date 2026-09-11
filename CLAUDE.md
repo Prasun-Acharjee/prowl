@@ -45,6 +45,7 @@ scripts, run one at a time:
 npx tsx src/lib/geo.test.ts
 npx tsx src/lib/petFilters.test.ts
 npx tsx src/lib/freshness.test.ts
+npx tsx src/lib/animalCheck.test.ts
 ```
 
 Keep those files importable by node: no `react-native` imports in the module under test
@@ -87,6 +88,8 @@ src/
     geo.ts                       Haversine distance, distance labels, maps URLs (pure; geo.test.ts)
     freshness.ts                 How stale a pet's last sighting is (pure; freshness.test.ts)
     sightings.ts                 One-tap "I see this cat" — position + log_sighting
+    animalCheck.ts               Scores ML Kit labels into an animal verdict (pure; animalCheck.test.ts)
+    imageLabels.ts               Bridge to the on-device ML Kit labeller (react-native)
   context/ThemeContext.tsx       Light/dark theme provider (follows OS scheme)
   constants/                     colors, typography, mapStyle, legal text
   types/index.ts                 Domain types (Pet, Sighting, Species, PetStatus, PetMatch)
@@ -126,6 +129,25 @@ src/
 - **Auth is anonymous.** `ensureAuth()` (called once in `App.tsx`) signs the device in
   anonymously via Supabase so RLS `authenticated` policies pass. There is no login in the
   mobile app.
+- **Photos are screened on device before upload.** `classifyPhoto()` runs Google ML Kit's
+  bundled image labeller (`@react-native-ml-kit/image-labeling`) on the local file and
+  `verdictFor()` scores the labels. A confident cat/dog passes silently and pre-selects the
+  species picker; anything else asks the user to approve the upload. Three rules hold this
+  together and should survive any change:
+  - **It runs before `uploadPhoto()`**, so a rejected photo never reaches the storage bucket.
+  - **It fails open.** A missing native module, a thrown labeller, or zero labels all yield
+    `uncertain` — one tap to confirm — never a hard block. Strays get photographed at night,
+    through fences, at distance; a classifier that silently ate those sightings would be
+    worse than no classifier.
+  - **It is a prompt, not a security boundary.** Genuine abuse is still handled by the
+    report/block flow from 00008. The label strings in `animalCheck.ts` come from Google's
+    label map and are worth tuning against real photos — `imageLabels.ts` logs everything it
+    gets back under `__DEV__` for that.
+
+  The native module is autolinked (`autolinkLibrariesFromCommand` in `android/settings.gradle`
+  reads `node_modules` at configure time), so the committed `android/` project needs no
+  regeneration — but **it does need a fresh native build**; it will not appear over a JS-only
+  reload, and Expo Go cannot run it.
 - **Photos are always uploaded as a pair** via `uploadPhoto()`: a 1080 px full image
   (`<id>.jpg`) and a 300 px thumbnail (`<id>_thumb.jpg`), in parallel. The thumb URL is
   derivable from the full URL by the `_thumb.jpg` suffix. Map pins/list rows use the small

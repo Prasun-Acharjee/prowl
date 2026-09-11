@@ -12,6 +12,7 @@
   "dependencies": {
     "@expo-google-fonts/dm-serif-display": "^0.2.3",
     "@expo-google-fonts/inter": "^0.2.3",
+    "@react-native-ml-kit/image-labeling": "^2.0.0",
     "@react-navigation/native": "^6.1.17",
     "@react-navigation/stack": "^6.3.29",
     "@supabase/supabase-js": "^2.110.0",

@@ -14,6 +14,8 @@ import { useTheme } from '../context/ThemeContext';
 import { type as t } from '../constants/typography';
 import { supabase } from '../lib/supabase';
 import { uploadPhoto } from '../lib/storage';
+import { classifyPhoto } from '../lib/imageLabels';
+import { uncertaintyPrompt } from '../lib/animalCheck';
 import { RootStackParamList } from '../navigation/RootNavigator';
 import { Species } from '../types';
 
@@ -64,6 +66,9 @@ export function CameraScreen() {
   // default; the picker exists because the schema and the map have always
   // supported dogs and nothing in the app could create one.
   const [species, setSpecies]     = useState<Species>('cat');
+  // The screening pass runs inside the 'uploading' screen but before any bytes
+  // leave the device, so the overlay has to say what is actually happening.
+  const [checking, setChecking]   = useState(false);
   const [saving, setSaving]       = useState(false);
   const [placePhrase, setPlacePhrase] = useState<string | null>(null);
   // Optional, and shared by every candidate: typing a note then tapping a pet
@@ -104,11 +109,49 @@ export function CameraScreen() {
     if (!result.canceled) await processPhoto(result.assets[0]);
   }
 
+  /**
+   * Asks the user to approve a photo the classifier could not vouch for.
+   * Resolves true to go ahead. Default button is "Add anyway": the classifier is
+   * wrong often enough that the cautious path should still be one tap.
+   */
+  function confirmUncertainPhoto(message: string): Promise<boolean> {
+    return new Promise(resolve => {
+      Alert.alert(
+        'Is this the right photo?',
+        message,
+        [
+          { text: 'Retake', style: 'cancel', onPress: () => resolve(false) },
+          { text: 'Add anyway', onPress: () => resolve(true) },
+        ],
+        { cancelable: false },
+      );
+    });
+  }
+
   async function processPhoto(asset: ImagePicker.ImagePickerAsset) {
     setCapturedUri(asset.uri);
     setScreen('uploading');
 
     try {
+      // Runs before the upload, not after: a photo the user decides against
+      // never costs bandwidth, never lands in the storage bucket, and never
+      // needs cleaning up. On-device, so the image itself goes nowhere.
+      setChecking(true);
+      const verdict = await classifyPhoto(asset.uri);
+      setChecking(false);
+
+      if (verdict.decision === 'uncertain') {
+        const approved = await confirmUncertainPhoto(uncertaintyPrompt(verdict));
+        if (!approved) {
+          setCapturedUri(null);
+          setScreen('capture');
+          return;
+        }
+      }
+      // A confident cat or dog pre-selects the picker on the new-pet panel.
+      // Only ever a starting point — the user can still change it there.
+      if (verdict.species) setSpecies(verdict.species);
+
       const exifCoords    = asset.exif ? extractExifLocation(asset.exif as Record<string, any>) : null;
       const effectiveCoords = exifCoords ?? coords;
       photoCoords.current = effectiveCoords;
@@ -144,6 +187,9 @@ export function CameraScreen() {
       setCandidates(rows);
       setScreen('candidates');
     } catch (err: any) {
+      // Clear the flag here too, or a retry after a failed upload opens on
+      // "Checking photo…" when it is doing nothing of the sort.
+      setChecking(false);
       Alert.alert('Upload failed', err.message);
       setScreen('capture');
       setCapturedUri(null);
@@ -333,7 +379,9 @@ export function CameraScreen() {
           {screen === 'uploading' && (
             <View style={styles.uploadOverlay}>
               <ActivityIndicator size="large" color={colors.amber} />
-              <Text style={[t.caption, { color: 'rgba(255,255,255,0.8)', marginTop: 8 }]}>Uploading…</Text>
+              <Text style={[t.caption, { color: 'rgba(255,255,255,0.8)', marginTop: 8 }]}>
+                {checking ? 'Checking photo…' : 'Uploading…'}
+              </Text>
             </View>
           )}
         </View>
