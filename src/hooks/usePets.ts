@@ -4,14 +4,7 @@ import { useCallback, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import { useHiddenContent } from './useModeration';
 import { Pet, Sighting } from '../types';
-
-// ─── Avatar colours ───────────────────────────────────────────────────────────
-
-const AVATAR_COLORS = ['#C9883A', '#5C6FA0', '#B85C3A', '#3A3C50', '#9E7E48', '#8FA889', '#C4728A'];
-function idColor(id: string): string {
-  const hash = id.split('').reduce((n, c) => n + c.charCodeAt(0), 0);
-  return AVATAR_COLORS[hash % AVATAR_COLORS.length];
-}
+import { avatarColor } from '../constants/colors';
 
 // ─── Row shapes ───────────────────────────────────────────────────────────────
 
@@ -49,7 +42,7 @@ function toPet(row: PetGeoRow): Pet {
     status: (row.status as Pet['status']) ?? 'stray',
     adoptionContact: row.adoption_contact ?? null,
     createdBy: row.created_by ?? null,
-    color: idColor(row.id),
+    color: avatarColor(row.id),
     initial: row.name.charAt(0).toUpperCase(),
   };
 }

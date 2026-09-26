@@ -9,13 +9,14 @@
 <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Inter:wght@400;500;700&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <link rel="stylesheet" href="styles.css" />
+<link rel="icon" type="image/svg+xml" href="logo-mark.svg" />
 </head>
 <body>
 
 <!-- ── Login ─────────────────────────────────────────────── -->
 <section id="login-view" class="hidden">
   <form id="login-form" class="login-card">
-    <div class="wordmark">prowl</div>
+    <div class="wordmark"><img src="logo-mark.svg" alt="" />Prowl</div>
     <p class="login-sub">admin dashboard</p>
     <input id="login-email" type="email" placeholder="Email" autocomplete="username" required />
     <input id="login-password" type="password" placeholder="Password" autocomplete="current-password" required />
@@ -27,7 +28,7 @@
 <!-- ── App ───────────────────────────────────────────────── -->
 <main id="app-view" class="hidden">
   <header class="topbar">
-    <div class="wordmark small">prowl</div>
+    <div class="wordmark small"><img src="logo-mark.svg" alt="" />Prowl</div>
     <nav>
       <button class="tab active" data-tab="pets">Pets</button>
       <button class="tab" data-tab="map">Map</button>
@@ -38,10 +39,10 @@
 
   <section class="stats" id="stats">
     <div class="stat-card"><span class="stat-num" id="stat-total">–</span><span class="stat-label">pets</span></div>
-    <div class="stat-card"><span class="stat-num rose" id="stat-adoptable">–</span><span class="stat-label">adoptable</span></div>
-    <div class="stat-card"><span class="stat-num amber" id="stat-adopted">–</span><span class="stat-label">adopted</span></div>
+    <div class="stat-card"><span class="stat-num violet" id="stat-adoptable">–</span><span class="stat-label">adoptable</span></div>
+    <div class="stat-card"><span class="stat-num accent" id="stat-adopted">–</span><span class="stat-label">adopted</span></div>
     <div class="stat-card"><span class="stat-num" id="stat-sightings">–</span><span class="stat-label">sightings · 7d</span></div>
-    <div class="stat-card"><span class="stat-num rose" id="stat-reports">–</span><span class="stat-label">open reports</span></div>
+    <div class="stat-card"><span class="stat-num violet" id="stat-reports">–</span><span class="stat-label">open reports</span></div>
   </section>
 
   <!-- Pets tab -->

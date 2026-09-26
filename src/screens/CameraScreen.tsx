@@ -2,8 +2,9 @@ import React, { useEffect, useRef, useState } from 'react';
 import { extractExifLocation } from '../lib/exif';
 import {
   View, Text, TouchableOpacity, ScrollView,
-  StyleSheet, Alert, TextInput, ActivityIndicator,
+  StyleSheet, Alert, TextInput, ActivityIndicator, Image as RNImage,
 } from 'react-native';
+import Animated, { FadeIn, FadeInRight, SlideInDown } from 'react-native-reanimated';
 import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, StackActions } from '@react-navigation/native';
@@ -16,6 +17,11 @@ import { supabase } from '../lib/supabase';
 import { uploadPhoto } from '../lib/storage';
 import { RootStackParamList } from '../navigation/RootNavigator';
 import { Species } from '../types';
+import { avatarColor } from '../constants/colors';
+import {
+  PressableScale, ToggleChip, SkeletonRow, SuccessOverlay, ShutterFlash,
+  staggerIn, photoSettle, hapticSuccess, SUCCESS_HOLD_MS,
+} from '../components/motion';
 
 type Nav = StackNavigationProp<RootStackParamList, 'Camera'>;
 
@@ -41,11 +47,6 @@ interface Candidate {
   distanceMeters: number;
 }
 
-const AVATAR_COLORS = ['#C9883A', '#5C6FA0', '#B85C3A', '#3A3C50', '#9E7E48', '#8FA889', '#C4728A'];
-function idColor(id: string) {
-  const h = id.split('').reduce((n, c) => n + c.charCodeAt(0), 0);
-  return AVATAR_COLORS[h % AVATAR_COLORS.length];
-}
 function fmtDist(m: number) { return m < 1000 ? `${Math.round(m)}m` : `${(m / 1000).toFixed(1)}km`; }
 
 export function CameraScreen() {
@@ -71,6 +72,17 @@ export function CameraScreen() {
   const [note, setNote]           = useState('');
 
   const photoCoords = useRef<{ lat: number; lng: number } | null>(null);
+
+  // Confirmation shown for a beat after a save, before the screen moves on.
+  const [done, setDone] = useState<string | null>(null);
+  const doneTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(doneTimer.current), []);
+
+  function celebrate(label: string, then: () => void) {
+    hapticSuccess();
+    setDone(label);
+    doneTimer.current = setTimeout(then, SUCCESS_HOLD_MS);
+  }
 
   const noun = species === 'dog' ? 'Dog' : 'Cat';
   // What the pet is called when the user leaves the name blank.
@@ -134,7 +146,7 @@ export function CameraScreen() {
           id:             row.id,
           name:           row.name,
           thumbnailUrl:   row.thumbnail_url,
-          color:          idColor(row.id),
+          color:          avatarColor(row.id),
           initial:        row.name.charAt(0).toUpperCase(),
           sightingCount:  row.sighting_count,
           distanceMeters: row.distance_meters ?? 0,
@@ -164,7 +176,7 @@ export function CameraScreen() {
         p_note:            note.trim() || null,
       });
       if (error) throw new Error(error.message);
-      nav.dispatch(StackActions.replace('PetDetail', { petId }));
+      celebrate('Sighting logged', () => nav.dispatch(StackActions.replace('PetDetail', { petId })));
     } catch (err: any) {
       Alert.alert('Error', err.message);
     } finally {
@@ -225,7 +237,7 @@ export function CameraScreen() {
       });
       if (logErr) throw new Error(logErr.message);
 
-      nav.navigate('PetDetail', { petId: pet.id });
+      celebrate('Added to the map', () => nav.navigate('PetDetail', { petId: pet.id }));
     } catch (err: any) {
       Alert.alert('Error', err.message);
     } finally {
@@ -238,9 +250,12 @@ export function CameraScreen() {
     header: {
       flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
       paddingHorizontal: 20, paddingVertical: 14,
-      borderBottomWidth: 1, borderBottomColor: colors.border,
     },
-    viewfinder:         { flex: 1, backgroundColor: colors.elevated, overflow: 'hidden' as const },
+    viewfinder: {
+      flex: 1, backgroundColor: colors.elevated, overflow: 'hidden' as const,
+      marginHorizontal: 12, borderRadius: 28, borderWidth: 1, borderColor: colors.border,
+    },
+    placeholderLogo: { width: 72, height: 72, opacity: 0.9 },
     viewfinderPlaceholder: { flex: 1, alignItems: 'center' as const, justifyContent: 'center' as const },
     uploadOverlay: {
       ...StyleSheet.absoluteFillObject,
@@ -250,43 +265,47 @@ export function CameraScreen() {
     controls: {
       flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
       paddingHorizontal: 32, paddingTop: 24,
-      backgroundColor: colors.surface, borderTopWidth: 1, borderTopColor: colors.border,
     },
-    controlBtn: { width: 60, alignItems: 'center' as const, paddingVertical: 8 },
+    controlBtn: {
+      width: 64, alignItems: 'center' as const, paddingVertical: 10, borderRadius: 16,
+      backgroundColor: colors.elevated, borderWidth: 1, borderColor: colors.border,
+    },
     shutter: {
-      width: 72, height: 72, borderRadius: 36,
-      borderWidth: 3, borderColor: colors.amber,
+      width: 78, height: 78, borderRadius: 39,
+      borderWidth: 3, borderColor: colors.accent,
       alignItems: 'center' as const, justifyContent: 'center' as const,
     },
-    shutterInner: { width: 58, height: 58, borderRadius: 29, backgroundColor: colors.amber },
+    shutterInner: {
+      width: 62, height: 62, borderRadius: 31, backgroundColor: colors.accent,
+      shadowColor: colors.accent, shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.45, shadowRadius: 12, elevation: 6,
+    },
     matchPanel: {
-      backgroundColor: colors.surface, borderTopWidth: 1, borderTopColor: colors.border,
+      backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border,
+      borderTopLeftRadius: 28, borderTopRightRadius: 28, marginTop: 12,
       paddingHorizontal: 20, paddingTop: 20,
     },
+    skeletons: { gap: 18, paddingVertical: 8 },
     matchRow: {
       flexDirection: 'row', alignItems: 'center', gap: 12,
       paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.border,
     },
-    matchAvatar:  { width: 40, height: 40, borderRadius: 20, alignItems: 'center' as const, justifyContent: 'center' as const },
-    matchInitial: { fontFamily: 'Inter_700Bold', fontSize: 15, color: colors.onAmber },
+    matchAvatar:  { width: 42, height: 42, borderRadius: 14, alignItems: 'center' as const, justifyContent: 'center' as const },
+    matchInitial: { fontFamily: 'Inter_700Bold', fontSize: 15, color: colors.onAccent },
     matchChip: {
       paddingHorizontal: 10, paddingVertical: 5,
-      backgroundColor: colors.amberFaint, borderRadius: 20,
-      borderWidth: 1, borderColor: colors.amberBorder,
+      backgroundColor: colors.accentFaint, borderRadius: 20,
+      borderWidth: 1, borderColor: colors.accentBorder,
       maxWidth: 120, flexShrink: 0 as any,
     },
     newPetRow: {
       marginTop: 16, paddingVertical: 14, paddingHorizontal: 16,
-      backgroundColor: colors.elevated, borderRadius: 12, borderWidth: 1, borderColor: colors.border,
+      backgroundColor: colors.elevated, borderRadius: 16, borderWidth: 1, borderColor: colors.border,
+      borderStyle: 'dashed' as const,
     },
     newPetPanel: { flex: 1, paddingHorizontal: 20, paddingTop: 32, backgroundColor: colors.surface },
     speciesRow:  { flexDirection: 'row', gap: 10 },
-    speciesChip: {
-      flex: 1, flexDirection: 'row', alignItems: 'center' as const, justifyContent: 'center' as const,
-      gap: 8, paddingVertical: 14, borderRadius: 14,
-      backgroundColor: colors.elevated, borderWidth: 1, borderColor: colors.border,
-    },
-    speciesChipOn: { backgroundColor: colors.amberFaint, borderColor: colors.amberBorder },
+    speciesChip: { paddingVertical: 14, borderRadius: 16 },
     noteInput: {
       backgroundColor: colors.elevated, borderRadius: 10,
       borderWidth: 1, borderColor: colors.border,
@@ -298,13 +317,15 @@ export function CameraScreen() {
       paddingHorizontal: 16, paddingVertical: 14, marginBottom: 8,
       color: colors.textPrimary, fontFamily: 'Inter_400Regular', fontSize: 16,
     },
-    btnAmber: {
-      paddingVertical: 16, borderRadius: 16, backgroundColor: colors.amber,
+    btnAccent: {
+      paddingVertical: 16, borderRadius: 16, backgroundColor: colors.accent,
       alignItems: 'center' as const,
-      shadowColor: colors.amber, shadowOffset: { width: 0, height: 4 },
+      shadowColor: colors.accent, shadowOffset: { width: 0, height: 4 },
       shadowOpacity: 0.35, shadowRadius: 12, elevation: 6,
     },
   }), [colors]);
+
+  const showPanel = screen === 'uploading' || screen === 'candidates';
 
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
@@ -323,100 +344,125 @@ export function CameraScreen() {
       {screen !== 'new-pet' && (
         <View style={styles.viewfinder}>
           {capturedUri ? (
-            <Image source={{ uri: capturedUri }} style={StyleSheet.absoluteFill} contentFit="cover" />
+            <>
+              <Animated.View key={capturedUri} entering={photoSettle} style={StyleSheet.absoluteFill}>
+                <Image source={{ uri: capturedUri }} style={StyleSheet.absoluteFill} contentFit="cover" />
+              </Animated.View>
+              <ShutterFlash key={`flash-${capturedUri}`} />
+            </>
           ) : (
-            <View style={styles.viewfinderPlaceholder}>
-              <Text style={{ fontSize: 52 }}>🐱</Text>
-              <Text style={[t.body, { color: colors.textMuted, marginTop: 10 }]}>Photograph the stray</Text>
-            </View>
+            <Animated.View entering={FadeIn.duration(260)} style={styles.viewfinderPlaceholder}>
+              <RNImage source={require('../../assets/logo-mark.png')} style={styles.placeholderLogo} />
+              <Text style={[t.body, { color: colors.textMuted, marginTop: 12 }]}>Photograph the stray</Text>
+            </Animated.View>
           )}
           {screen === 'uploading' && (
-            <View style={styles.uploadOverlay}>
-              <ActivityIndicator size="large" color={colors.amber} />
+            <Animated.View entering={FadeIn.delay(200).duration(220)} style={styles.uploadOverlay}>
+              <ActivityIndicator size="large" color={colors.accent} />
               <Text style={[t.caption, { color: 'rgba(255,255,255,0.8)', marginTop: 8 }]}>Uploading…</Text>
-            </View>
+            </Animated.View>
           )}
         </View>
       )}
 
       {/* Capture controls */}
       {screen === 'capture' && (
-        <View style={[styles.controls, { paddingBottom: insets.bottom + 24 }]}>
-          <TouchableOpacity style={styles.controlBtn} onPress={handleLibrary}>
+        <Animated.View entering={FadeIn.duration(220)} style={[styles.controls, { paddingBottom: insets.bottom + 24 }]}>
+          <PressableScale style={styles.controlBtn} onPress={handleLibrary}>
             <Text style={[t.caption, { color: colors.textSecondary }]}>Library</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.shutter} onPress={handleCapture}>
+          </PressableScale>
+          <PressableScale style={styles.shutter} onPress={handleCapture} haptic scaleTo={0.9}>
             <View style={styles.shutterInner} />
-          </TouchableOpacity>
-          <View style={{ width: 60 }} />
-        </View>
+          </PressableScale>
+          <View style={{ width: 64 }} />
+        </Animated.View>
       )}
 
-      {/* Candidates */}
-      {screen === 'candidates' && (
-        <View style={[styles.matchPanel, { paddingBottom: insets.bottom + 16 }]}>
-          <Text style={[t.label, { color: colors.textMuted, marginBottom: 14 }]}>
-            {candidates.length > 0 ? 'Nearest pets first' : 'No known pets in range'}
-          </Text>
-          <TextInput
-            style={styles.noteInput}
-            placeholder="Add a note (optional) — e.g. limping, new collar"
-            placeholderTextColor={colors.textMuted}
-            value={note}
-            onChangeText={setNote}
-            maxLength={200}
-          />
-          <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 240 }}>
-            {candidates.map(c => (
-              <TouchableOpacity key={c.id} style={styles.matchRow} onPress={() => confirmMatch(c.id)} disabled={saving}>
-                <View style={[styles.matchAvatar, { backgroundColor: c.color }]}>
-                  <Text style={styles.matchInitial}>{c.initial}</Text>
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={[t.bodyMed, { color: colors.textPrimary }]}>{c.name}</Text>
-                  <Text style={[t.caption, { color: colors.textSecondary }]}>
-                    {fmtDist(c.distanceMeters)} away · {c.sightingCount} sightings
+      {/* Candidates. The panel rises in while the photo uploads, holding skeleton
+          rows, so the matches land in a panel that is already there. */}
+      {showPanel && (
+        <Animated.View
+          entering={SlideInDown.springify().damping(20).stiffness(170)}
+          style={[styles.matchPanel, { paddingBottom: insets.bottom + 16 }]}
+        >
+          {screen === 'uploading' ? (
+            <>
+              <Text style={[t.label, { color: colors.textMuted, marginBottom: 14 }]}>Looking for pets nearby…</Text>
+              <View style={styles.skeletons}>
+                <SkeletonRow avatar={42} />
+                <SkeletonRow avatar={42} />
+                <SkeletonRow avatar={42} />
+              </View>
+            </>
+          ) : (
+            <Animated.View entering={FadeIn.duration(200)}>
+              <Text style={[t.label, { color: colors.textMuted, marginBottom: 14 }]}>
+                {candidates.length > 0 ? 'Nearest pets first' : 'No known pets in range'}
+              </Text>
+              <TextInput
+                style={styles.noteInput}
+                placeholder="Add a note (optional) — e.g. limping, new collar"
+                placeholderTextColor={colors.textMuted}
+                value={note}
+                onChangeText={setNote}
+                maxLength={200}
+              />
+              <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 240 }}>
+                {candidates.map((c, i) => (
+                  <Animated.View key={c.id} entering={staggerIn(i, 80)}>
+                    <TouchableOpacity style={styles.matchRow} onPress={() => confirmMatch(c.id)} disabled={saving}>
+                      <View style={[styles.matchAvatar, { backgroundColor: c.color }]}>
+                        <Text style={styles.matchInitial}>{c.initial}</Text>
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={[t.bodyMed, { color: colors.textPrimary }]}>{c.name}</Text>
+                        <Text style={[t.caption, { color: colors.textSecondary }]}>
+                          {fmtDist(c.distanceMeters)} away · {c.sightingCount} sightings
+                        </Text>
+                      </View>
+                      <View style={styles.matchChip}>
+                        <Text style={[t.caption, { color: colors.accent }]} numberOfLines={1}>It's {c.name}</Text>
+                      </View>
+                    </TouchableOpacity>
+                  </Animated.View>
+                ))}
+              </ScrollView>
+              <Animated.View entering={staggerIn(candidates.length, 80)}>
+                <PressableScale style={styles.newPetRow} onPress={handleNewPet} scaleTo={0.98}>
+                  <Text style={[t.bodyMed, { color: colors.textPrimary }]}>+ New pet</Text>
+                  <Text style={[t.caption, { color: colors.textMuted, marginTop: 2 }]}>
+                    Not in the list? Create a new entry.
                   </Text>
-                </View>
-                <View style={styles.matchChip}>
-                  <Text style={[t.caption, { color: colors.amber }]} numberOfLines={1}>It's {c.name}</Text>
-                </View>
+                </PressableScale>
+              </Animated.View>
+              <TouchableOpacity onPress={() => { setCapturedUri(null); setScreen('capture'); }} style={{ alignItems: 'center', marginTop: 10 }}>
+                <Text style={[t.caption, { color: colors.textMuted }]}>Retake photo</Text>
               </TouchableOpacity>
-            ))}
-          </ScrollView>
-          <TouchableOpacity style={styles.newPetRow} onPress={handleNewPet}>
-            <Text style={[t.bodyMed, { color: colors.textPrimary }]}>+ New pet</Text>
-            <Text style={[t.caption, { color: colors.textMuted, marginTop: 2 }]}>
-              Not in the list? Create a new entry.
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={() => { setCapturedUri(null); setScreen('capture'); }} style={{ alignItems: 'center', marginTop: 10 }}>
-            <Text style={[t.caption, { color: colors.textMuted }]}>Retake photo</Text>
-          </TouchableOpacity>
-        </View>
+            </Animated.View>
+          )}
+        </Animated.View>
       )}
 
       {/* New pet entry */}
       {screen === 'new-pet' && (
-        <View style={[styles.newPetPanel, { paddingBottom: insets.bottom + 24 }]}>
+        <Animated.View
+          entering={FadeInRight.springify().damping(20)}
+          style={[styles.newPetPanel, { paddingBottom: insets.bottom + 24 }]}
+        >
           <Text style={[t.label, { color: colors.textMuted, marginBottom: 10 }]}>What is it?</Text>
           <View style={styles.speciesRow}>
-            {SPECIES.map(sp => {
-              const on = species === sp.value;
-              return (
-                <TouchableOpacity
-                  key={sp.value}
-                  style={[styles.speciesChip, on && styles.speciesChipOn]}
-                  onPress={() => setSpecies(sp.value)}
-                  activeOpacity={0.75}
-                >
-                  <Text style={{ fontSize: 18 }}>{sp.glyph}</Text>
-                  <Text style={[t.bodyMed, { color: on ? colors.amber : colors.textSecondary }]}>
-                    {sp.label}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
+            {SPECIES.map(sp => (
+              <ToggleChip
+                key={sp.value}
+                on={species === sp.value}
+                label={sp.label}
+                onPress={() => setSpecies(sp.value)}
+                leading={<Text style={{ fontSize: 18 }}>{sp.glyph}</Text>}
+                style={{ flex: 1 }}
+                chipStyle={styles.speciesChip}
+                textStyle={t.bodyMed}
+              />
+            ))}
           </View>
 
           <Text style={[t.label, { color: colors.textMuted, marginTop: 22, marginBottom: 4 }]}>
@@ -438,20 +484,23 @@ export function CameraScreen() {
               Will be added as "{fallbackName}"
             </Text>
           ) : null}
-          <TouchableOpacity
-            style={[styles.btnAmber, { opacity: !saving ? 1 : 0.5 }]}
+          <PressableScale
+            style={[styles.btnAccent, { opacity: !saving ? 1 : 0.5 }]}
             onPress={createNewPet}
             disabled={saving}
+            haptic
           >
             {saving
-              ? <ActivityIndicator color={colors.onAmber} />
-              : <Text style={[t.bodyMed, { color: colors.onAmber }]}>Add to map</Text>}
-          </TouchableOpacity>
+              ? <ActivityIndicator color={colors.onAccent} />
+              : <Text style={[t.bodyMed, { color: colors.onAccent }]}>Add to map</Text>}
+          </PressableScale>
           <TouchableOpacity onPress={() => setScreen('candidates')} style={{ alignItems: 'center', marginTop: 12 }}>
             <Text style={[t.caption, { color: colors.textMuted }]}>Back</Text>
           </TouchableOpacity>
-        </View>
+        </Animated.View>
       )}
+
+      {!!done && <SuccessOverlay label={done} />}
     </View>
   );
 }

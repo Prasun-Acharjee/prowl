@@ -1,16 +1,17 @@
 :root {
-  --bg: #0d0e18;
-  --surface: #151726;
-  --elevated: #1c1f33;
-  --border: rgba(255, 255, 255, 0.09);
-  --text: #f2f1ec;
-  --text-2: #b9b7ae;
-  --muted: #6d6c78;
-  --amber: #f5b93e;
-  --amber-faint: rgba(245, 185, 62, 0.12);
-  --rose: #c4728a;
-  --rose-faint: rgba(196, 114, 138, 0.14);
-  --on-amber: #0d0e18;
+  /* Coral Dusk — mirrors src/constants/colors.ts (dark) */
+  --bg: #160f1f;
+  --surface: #20172b;
+  --elevated: #2a1f38;
+  --border: #3a2d4a;
+  --text: #f6eef4;
+  --text-2: #b4a6bf;
+  --muted: #6c5e7a;
+  --accent: #ff7a6b;
+  --accent-faint: rgba(255, 122, 107, 0.14);
+  --violet: #b892ff;
+  --violet-faint: rgba(184, 146, 255, 0.14);
+  --on-accent: #160f1f;
 }
 
 * { box-sizing: border-box; margin: 0; }
@@ -28,9 +29,12 @@ body {
 .wordmark {
   font-family: 'DM Serif Display', serif;
   font-size: 42px;
-  color: var(--amber);
+  color: var(--text);
   letter-spacing: 0.5px;
+  display: inline-flex; align-items: center; gap: 10px;
 }
+.wordmark img { width: 44px; height: 44px; }
+.wordmark.small img { width: 28px; height: 28px; }
 .wordmark.small { font-size: 26px; }
 
 /* ── Login ─────────────────────────────────────────────── */
@@ -56,13 +60,13 @@ body {
   padding: 12px 14px;
   font: inherit;
 }
-.login-card input:focus { outline: 1px solid var(--amber); }
+.login-card input:focus { outline: 1px solid var(--accent); }
 .login-card button[type="submit"] {
-  background: var(--amber); color: var(--on-amber);
+  background: var(--accent); color: var(--on-accent);
   border: none; border-radius: 10px; padding: 12px;
   font: inherit; font-weight: 700; cursor: pointer; margin-top: 6px;
 }
-.error { color: var(--rose); font-size: 13px; }
+.error { color: var(--accent); font-size: 13px; }
 
 /* ── Layout ────────────────────────────────────────────── */
 .topbar {
@@ -94,8 +98,8 @@ body {
   display: flex; flex-direction: column; gap: 4px;
 }
 .stat-num { font-size: 30px; font-weight: 700; }
-.stat-num.rose { color: var(--rose); }
-.stat-num.amber { color: var(--amber); }
+.stat-num.violet { color: var(--violet); }
+.stat-num.accent { color: var(--accent); }
 .stat-label { color: var(--muted); font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase; }
 
 /* ── Pets table ────────────────────────────────────────── */
@@ -107,7 +111,7 @@ th {
   padding: 10px 12px; border-bottom: 1px solid var(--border);
 }
 td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
-tr:hover td { background: rgba(255, 255, 255, 0.02); }
+tr:hover td { background: rgba(255, 255, 255, 0.03); }
 
 .thumb {
   width: 42px; height: 42px; border-radius: 21px; object-fit: cover; display: block;
@@ -115,31 +119,31 @@ tr:hover td { background: rgba(255, 255, 255, 0.02); }
 .thumb-initial {
   width: 42px; height: 42px; border-radius: 21px;
   display: flex; align-items: center; justify-content: center;
-  font-weight: 700; color: var(--on-amber); font-size: 17px;
+  font-weight: 700; color: var(--on-accent); font-size: 17px;
 }
 .pet-name { font-weight: 500; cursor: pointer; }
-.pet-name:hover { color: var(--amber); }
+.pet-name:hover { color: var(--accent); }
 
 select.status {
   background: var(--elevated); color: var(--text);
   border: 1px solid var(--border); border-radius: 8px;
   padding: 7px 10px; font: inherit; cursor: pointer;
 }
-select.status.adoptable { color: var(--rose); border-color: var(--rose); }
-select.status.adopted { color: var(--amber); border-color: var(--amber); }
+select.status.adoptable { color: var(--violet); border-color: var(--violet); }
+select.status.adopted { color: var(--accent); border-color: var(--accent); }
 
 input.contact {
   background: var(--elevated); color: var(--text);
   border: 1px solid var(--border); border-radius: 8px;
   padding: 7px 10px; font: inherit; width: 210px;
 }
-input.contact:focus { outline: 1px solid var(--amber); }
+input.contact:focus { outline: 1px solid var(--accent); }
 
 .danger {
   background: none; border: none; cursor: pointer;
   color: var(--muted); font-size: 15px; padding: 6px;
 }
-.danger:hover { color: var(--rose); }
+.danger:hover { color: var(--accent); }
 
 .muted { color: var(--muted); }
 
@@ -180,7 +184,7 @@ input.contact:focus { outline: 1px solid var(--amber); }
   background: var(--elevated); border: 1px solid var(--border);
   color: var(--text); padding: 11px 20px; border-radius: 12px; z-index: 2000;
 }
-#toast.error { border-color: var(--rose); color: var(--rose); }
+#toast.error { border-color: var(--accent); color: var(--accent); }
 
 @media (max-width: 720px) {
   .stats { grid-template-columns: repeat(2, 1fr); }
@@ -200,9 +204,29 @@ input.contact:focus { outline: 1px solid var(--amber); }
   margin-left: 6px;
   padding: 1px 6px;
   border-radius: 9px;
-  background: var(--rose);
-  color: #fff;
+  background: var(--accent);
+  color: var(--on-accent);
   font-size: 11px;
   font-weight: 700;
   text-align: center;
+}
+
+/* ── Motion ───────────────────────────────────────────────────────── */
+/* Same restraint as the app: short, eased, and off for reduced motion. */
+
+button, select, input, tr td, .pet-name {
+  transition: background-color 160ms ease, color 160ms ease, border-color 160ms ease, transform 160ms ease;
+}
+button:active { transform: scale(0.97); }
+
+#modal-backdrop:not(.hidden) { animation: fade-in 180ms ease-out; }
+#modal-backdrop:not(.hidden) > * { animation: rise-in 260ms cubic-bezier(0.22, 1.2, 0.36, 1); }
+#login-view:not(.hidden) .login-card,
+#app-view:not(.hidden) { animation: rise-in 320ms cubic-bezier(0.22, 1, 0.36, 1); }
+
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes rise-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
 }

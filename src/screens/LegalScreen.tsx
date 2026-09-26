@@ -3,6 +3,8 @@ import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, Linking, Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Animated from 'react-native-reanimated';
+import { staggerIn } from '../components/motion';
 import { useNavigation } from '@react-navigation/native';
 import { useTheme } from '../context/ThemeContext';
 import { type as t } from '../constants/typography';
@@ -37,7 +39,7 @@ export function LegalScreen() {
     section: {
       marginHorizontal: 20, marginTop: 28,
       backgroundColor: colors.surface,
-      borderRadius: 16, borderWidth: 1, borderColor: colors.border,
+      borderRadius: 20, borderWidth: 1, borderColor: colors.border,
       overflow: 'hidden',
     },
     sectionTitle: {
@@ -60,12 +62,12 @@ export function LegalScreen() {
     },
     dot: {
       width: 6, height: 6, borderRadius: 3,
-      backgroundColor: colors.amber, marginTop: 7, flexShrink: 0,
+      backgroundColor: colors.accent, marginTop: 7, flexShrink: 0,
     },
     infoBox: {
       marginHorizontal: 20, marginTop: 20,
-      backgroundColor: colors.amberFaint,
-      borderRadius: 12, borderWidth: 1, borderColor: colors.amberBorder,
+      backgroundColor: colors.accentFaint,
+      borderRadius: 20, borderWidth: 1, borderColor: colors.accentBorder,
       padding: 14,
     },
   }), [colors]);
@@ -84,8 +86,8 @@ export function LegalScreen() {
       <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: insets.bottom + 40 }}>
 
         {/* Quick summary */}
-        <View style={styles.infoBox}>
-          <Text style={[t.bodyMed, { color: colors.amber, marginBottom: 8 }]}>What Prowl collects</Text>
+        <Animated.View entering={staggerIn(0)} style={styles.infoBox}>
+          <Text style={[t.bodyMed, { color: colors.accent, marginBottom: 8 }]}>What Prowl collects</Text>
           {[
             'Your GPS location, when logging a sighting or viewing the map',
             'Photos you choose to attach to a sighting',
@@ -100,10 +102,10 @@ export function LegalScreen() {
           <Text style={[t.caption, { color: colors.textSecondary, marginTop: 8 }]}>
             We do not sell your data or use it for advertising.
           </Text>
-        </View>
+        </Animated.View>
 
         {/* Documents */}
-        <View style={styles.section}>
+        <Animated.View entering={staggerIn(1)} style={styles.section}>
           <View style={styles.sectionTitle}>
             <Text style={[t.label, { color: colors.textMuted }]}>LEGAL DOCUMENTS</Text>
           </View>
@@ -121,10 +123,10 @@ export function LegalScreen() {
             </View>
             <Text style={styles.arrow}>›</Text>
           </TouchableOpacity>
-        </View>
+        </Animated.View>
 
         {/* Data & rights */}
-        <View style={styles.section}>
+        <Animated.View entering={staggerIn(2)} style={styles.section}>
           <View style={styles.sectionTitle}>
             <Text style={[t.label, { color: colors.textMuted }]}>YOUR DATA</Text>
           </View>
@@ -145,10 +147,10 @@ export function LegalScreen() {
             </View>
             <Text style={styles.arrow}>›</Text>
           </TouchableOpacity>
-        </View>
+        </Animated.View>
 
         {/* Contact */}
-        <View style={styles.section}>
+        <Animated.View entering={staggerIn(3)} style={styles.section}>
           <View style={styles.sectionTitle}>
             <Text style={[t.label, { color: colors.textMuted }]}>CONTACT</Text>
           </View>
@@ -159,11 +161,11 @@ export function LegalScreen() {
           >
             <View style={{ gap: 2 }}>
               <Text style={[t.bodyMed, { color: colors.textPrimary }]}>Get in touch</Text>
-              <Text style={[t.caption, { color: colors.amber }]}>{CONTACT_EMAIL}</Text>
+              <Text style={[t.caption, { color: colors.accent }]}>{CONTACT_EMAIL}</Text>
             </View>
             <Text style={styles.arrow}>›</Text>
           </TouchableOpacity>
-        </View>
+        </Animated.View>
 
         {/* Version / legal footer */}
         <View style={{ alignItems: 'center', marginTop: 32, gap: 4 }}>

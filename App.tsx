@@ -8,6 +8,7 @@ import { useFonts, DMSerifDisplay_400Regular } from '@expo-google-fonts/dm-serif
 import { Inter_400Regular, Inter_500Medium, Inter_700Bold } from '@expo-google-fonts/inter';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { RootNavigator } from './src/navigation/RootNavigator';
 import { ThemeProvider, useTheme } from './src/context/ThemeContext';
 import { ensureAuth } from './src/lib/supabase';
@@ -56,12 +57,16 @@ export default function App() {
   if ((!fontsLoaded && !fontError) || !authReady) return null;
 
   return (
-    <QueryClientProvider client={queryClient}>
-      <SafeAreaProvider>
-        <ThemeProvider>
-          <AppShell />
-        </ThemeProvider>
-      </SafeAreaProvider>
-    </QueryClientProvider>
+    // Gesture root: the map's list sheet is dragged with a Gesture Handler pan,
+    // which needs a root view above it to receive touches.
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <QueryClientProvider client={queryClient}>
+        <SafeAreaProvider>
+          <ThemeProvider>
+            <AppShell />
+          </ThemeProvider>
+        </SafeAreaProvider>
+      </QueryClientProvider>
+    </GestureHandlerRootView>
   );
 }

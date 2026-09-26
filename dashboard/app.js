@@ -9,7 +9,8 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 const $ = (id) => document.getElementById(id);
 
-const AVATAR_COLORS = ['#C9883A', '#5C6FA0', '#B85C3A', '#3A3C50', '#9E7E48', '#8FA889', '#C4728A'];
+// Mirrors AVATAR_COLORS in src/constants/colors.ts so a pet keeps its colour.
+const AVATAR_COLORS = ['#FF8A7A', '#B892FF', '#6FD6B5', '#F2B36B', '#E58FB8', '#8FB3FF', '#C9A7E8'];
 function idColor(id) {
   const hash = id.split('').reduce((n, c) => n + c.charCodeAt(0), 0);
   return AVATAR_COLORS[hash % AVATAR_COLORS.length];
@@ -293,11 +294,11 @@ $('modal-backdrop').addEventListener('click', (e) => {
 /* ── Map ──────────────────────────────────────────────────────────── */
 
 function pinColor(p) {
-  if (p.status === 'adoptable') return '#C4728A';
+  if (p.status === 'adoptable') return '#B892FF';
   const hours = (Date.now() - new Date(p.last_seen_at).getTime()) / 3_600_000;
-  if (hours < 24) return '#F5B93E';
-  if (hours < 168) return '#C4728A';
-  return '#6D6C78';
+  if (hours < 24) return '#FF7A6B';
+  if (hours < 168) return '#B892FF';
+  return '#6C5E7A';
 }
 
 function initMap() {

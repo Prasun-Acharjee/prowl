@@ -9,8 +9,8 @@ import { Pet } from '../types';
 // leaves pin colours stale for the whole session.
 function pinColor(lastSeenAt: string, c: ColorTheme): string {
   const hours = (Date.now() - new Date(lastSeenAt).getTime()) / 3_600_000;
-  if (hours < 24)  return c.amber;
-  if (hours < 168) return c.rose;
+  if (hours < 24)  return c.accent;
+  if (hours < 168) return c.violet;
   return c.textMuted;
 }
 
@@ -48,14 +48,38 @@ export function PetPin({ pet, size = 44, onImageLoad, showBorder = false }: PetP
   const radius    = size / 2;
   const badgeSize = Math.max(14, Math.round(size * 0.36));
 
+  // Marker animations are iOS-only. Apple Maps hosts marker children as live
+  // views, so they can move; Google Maps on Android rasterizes each marker into a
+  // bitmap (see useMarkerSettle in MapScreen), and animating inside one either
+  // freezes mid-frame or forces the re-snapshot-every-frame mode that makes the
+  // whole map stutter. Android pins simply appear.
+  const animate = Platform.OS === 'ios';
+
+  // Drop-in: the pin falls a few points and settles with a small bounce the first
+  // time it mounts (map load, or panning into a new area).
+  const drop = useRef(new Animated.Value(animate ? 0 : 1)).current;
+  useEffect(() => {
+    if (!animate) return;
+    Animated.spring(drop, { toValue: 1, useNativeDriver: true, damping: 11, stiffness: 180, mass: 0.8 }).start();
+  }, []);
+  const dropStyle = animate ? {
+    opacity: drop.interpolate({ inputRange: [0, 0.4, 1], outputRange: [0, 1, 1] }),
+    transform: [
+      { translateY: drop.interpolate({ inputRange: [0, 1], outputRange: [-18, 0] }) },
+      { scale: drop.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1] }) },
+    ],
+  } : null;
+
+  // Sonar ring on pins seen in the last 24 h.
   const ring = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
-    if (!recent || Platform.OS === 'android') return;
+    if (!recent || !animate) return;
     const loop = Animated.loop(
       Animated.sequence([
         Animated.timing(ring, { toValue: 2.6, duration: 2000, easing: Easing.out(Easing.ease), useNativeDriver: true }),
         Animated.timing(ring, { toValue: 1, duration: 0, useNativeDriver: true }),
+        Animated.delay(400),
       ]),
     );
     loop.start();
@@ -65,18 +89,18 @@ export function PetPin({ pet, size = 44, onImageLoad, showBorder = false }: PetP
   const ringOpacity = ring.interpolate({ inputRange: [1, 2.6], outputRange: [0.55, 0] });
 
   return (
-    <View
+    <Animated.View
       collapsable={false}
-      style={{
+      style={[dropStyle, {
         alignItems: 'center',
         // border-box sizing: content width stays exactly `size`.
         width: size + OVERHANG * 2,
         paddingHorizontal: OVERHANG,
         paddingTop: OVERHANG,
         // No bottom padding — the marker's y:1 anchor must land on the tip.
-      }}
+      }]}
     >
-      {recent && Platform.OS !== 'android' && (
+      {recent && animate && (
         <Animated.View style={{
           position: 'absolute', top: 0,
           width: size, height: size, borderRadius: radius,
@@ -101,7 +125,7 @@ export function PetPin({ pet, size = 44, onImageLoad, showBorder = false }: PetP
         }}
       >
         {showInitial ? (
-          <Text style={{ fontFamily: fonts.bodyBold, fontSize, color: colors.onAmber }}>
+          <Text style={{ fontFamily: fonts.bodyBold, fontSize, color: colors.onAccent }}>
             {pet.initial}
           </Text>
         ) : (
@@ -122,7 +146,7 @@ export function PetPin({ pet, size = 44, onImageLoad, showBorder = false }: PetP
         <View style={{
           position: 'absolute', top: -3, right: -3,
           width: badgeSize, height: badgeSize, borderRadius: badgeSize / 2,
-          backgroundColor: colors.rose,
+          backgroundColor: colors.violet,
           borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.9)',
           alignItems: 'center', justifyContent: 'center',
         }}>
@@ -137,6 +161,6 @@ export function PetPin({ pet, size = 44, onImageLoad, showBorder = false }: PetP
         borderTopColor: color,
         marginTop: -1,
       }} />
-    </View>
+    </Animated.View>
   );
 }

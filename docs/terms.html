@@ -7,12 +7,12 @@
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
-      --bg: #0D0E18;
-      --surface: #161824;
-      --amber: #F5B93E;
-      --text: #F0EDE8;
-      --muted: #9B9AAD;
-      --border: #2A2C3D;
+      --bg: #160F1F;
+      --surface: #20172B;
+      --accent: #FF7A6B;
+      --text: #F6EEF4;
+      --muted: #B4A6BF;
+      --border: #3A2D4A;
     }
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -31,7 +31,7 @@
     .wordmark {
       font-size: 22px;
       letter-spacing: 4px;
-      color: var(--amber);
+      color: var(--accent);
       font-weight: 700;
       text-transform: lowercase;
       margin-bottom: 16px;
@@ -41,7 +41,7 @@
     h2 {
       font-size: 18px;
       font-weight: 700;
-      color: var(--amber);
+      color: var(--accent);
       margin: 36px 0 12px;
       padding-bottom: 6px;
       border-bottom: 1px solid var(--border);
@@ -50,12 +50,12 @@
     p { margin-bottom: 14px; color: var(--text); }
     ul { margin: 8px 0 14px 20px; }
     li { margin-bottom: 6px; color: var(--text); }
-    a { color: var(--amber); text-decoration: none; }
+    a { color: var(--accent); text-decoration: none; }
     a:hover { text-decoration: underline; }
     .callout {
       background: var(--surface);
       border: 1px solid var(--border);
-      border-left: 3px solid var(--amber);
+      border-left: 3px solid var(--accent);
       border-radius: 8px;
       padding: 16px 18px;
       margin: 20px 0;
@@ -64,12 +64,12 @@
     footer { margin-top: 48px; padding-top: 24px; border-top: 1px solid var(--border); color: var(--muted); font-size: 13px; }
     @media (prefers-color-scheme: light) {
       :root {
-        --bg: #F0EFF6;
-        --surface: #F8F7FC;
-        --amber: #B8851A;
-        --text: #1C1A2E;
-        --muted: #65637A;
-        --border: #DDDCE6;
+        --bg: #F7F2F7;
+        --surface: #FCF9FC;
+        --accent: #C8402F;
+        --text: #22162E;
+        --muted: #6A5A78;
+        --border: #E6DCE8;
       }
     }
   </style>

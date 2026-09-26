@@ -1,9 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, Animated, PanResponder,
+  View, Text, StyleSheet, TouchableOpacity,
   Platform, ActivityIndicator, ScrollView, TextInput, Alert, RefreshControl,
   Image as RNImage,
 } from 'react-native';
+import Animated, {
+  Easing, FadeIn, FadeInDown, LayoutAnimationConfig, cancelAnimation, interpolate,
+  runOnJS, useAnimatedStyle, useSharedValue, withSpring, withTiming,
+} from 'react-native-reanimated';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { Image } from 'expo-image';
 import MapView, { Marker, PROVIDER_GOOGLE, Region } from 'react-native-maps';
 import Supercluster from 'supercluster';
@@ -14,8 +19,12 @@ import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { useTheme, useColors } from '../context/ThemeContext';
 import { type as t } from '../constants/typography';
-import { DARK_MAP_STYLE } from '../constants/mapStyle';
+import { DARK_MAP_STYLE, LIGHT_MAP_STYLE } from '../constants/mapStyle';
 import { PetPin } from '../components/PetPin';
+import {
+  PressableScale, ToggleChip, SkeletonRow, SuccessStamp,
+  springs, staggerIn, reflow, hapticSuccess,
+} from '../components/motion';
 import { Pet, Species } from '../types';
 import { RootStackParamList } from '../navigation/RootNavigator';
 import { usePetsInViewport, usePetSearch } from '../hooks/usePets';
@@ -130,7 +139,7 @@ function ClusterPin({ count, photoUri, onImageSettled }: {
       collapsable={false}
       style={{
         width: CLUSTER_RING, height: CLUSTER_RING, borderRadius: CLUSTER_RING / 2,
-        backgroundColor: colors.amberFaint, borderWidth: 1, borderColor: colors.amberBorder,
+        backgroundColor: colors.accentFaint, borderWidth: 1, borderColor: colors.accentBorder,
         alignItems: 'center', justifyContent: 'center',
       }}
     >
@@ -138,9 +147,9 @@ function ClusterPin({ count, photoUri, onImageSettled }: {
         collapsable={false}
         style={{
           width: CLUSTER_PHOTO, height: CLUSTER_PHOTO, borderRadius: photoRadius,
-          backgroundColor: colors.amber,
+          backgroundColor: colors.accent,
           overflow: 'hidden',
-          borderWidth: 2, borderColor: colors.amber,
+          borderWidth: 2, borderColor: colors.accent,
           alignItems: 'center', justifyContent: 'center',
         }}
       >
@@ -161,12 +170,12 @@ function ClusterPin({ count, photoUri, onImageSettled }: {
       {/* Count badge */}
       <View style={{
         position: 'absolute', top: 2, right: 2,
-        backgroundColor: colors.elevated,
+        backgroundColor: colors.accent,
         borderRadius: CLUSTER_BADGE / 2, minWidth: CLUSTER_BADGE, height: CLUSTER_BADGE,
         paddingHorizontal: 6, alignItems: 'center', justifyContent: 'center',
-        borderWidth: 1, borderColor: colors.amber,
+        borderWidth: 2, borderColor: colors.surface,
       }}>
-        <Text style={{ fontFamily: 'Inter_700Bold', fontSize: 12, color: colors.amber }}>
+        <Text style={{ fontFamily: 'Inter_700Bold', fontSize: 12, color: colors.onAccent }}>
           {count}
         </Text>
       </View>
@@ -269,9 +278,14 @@ export function MapScreen() {
   const [queryBounds, setQueryBounds] = useState<[number, number, number, number] | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
-  const pinSheetY = useRef(new Animated.Value(0)).current;
-  const listY     = useRef(new Animated.Value(LIST_FULL - LIST_PEEK)).current;
-  const mapRef    = useRef<MapView>(null);
+  // Both sheets are driven on the UI thread. pinProgress runs 0 (hidden) → 1
+  // (shown); listY is the list sheet's translateY, 0 fully open → peek.
+  const pinProgress = useSharedValue(0);
+  const listY       = useSharedValue(LIST_FULL - LIST_PEEK);
+  // The peek offset, mirrored into a shared value so the drag worklet can read it.
+  const peekSV      = useSharedValue(LIST_FULL - LIST_PEEK);
+  const dragStartY  = useSharedValue(0);
+  const mapRef      = useRef<MapView>(null);
 
   const [filters, setFilters]     = useState<PetFilters>(NO_FILTERS);
   const [search, setSearch]       = useState('');
@@ -401,7 +415,8 @@ export function MapScreen() {
 
   useEffect(() => {
     const peekY = Math.max(LIST_FULL - LIST_PEEK - insets.bottom, 0);
-    if (!listOpen) listY.setValue(peekY);
+    peekSV.value = peekY;
+    if (!listOpen) listY.value = peekY;
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [insets.bottom]);
 
@@ -413,27 +428,32 @@ export function MapScreen() {
 
   function snapToOpen() {
     setListOpen(true);
-    Animated.spring(listY, { toValue: 0, useNativeDriver: false, tension: 55, friction: 10 }).start();
+    listY.value = withSpring(0, springs.sheet);
   }
 
   function snapToPeek() {
     setListOpen(false);
-    Animated.spring(listY, { toValue: peekY(), useNativeDriver: false, tension: 55, friction: 10 }).start();
+    listY.value = withSpring(peekY(), springs.sheet);
   }
 
   function toggleList() { if (listOpen) snapToPeek(); else snapToOpen(); }
 
   function openPinSheet(pet: Pet) {
     setListOpen(false);
-    listY.stopAnimation();
-    Animated.spring(listY, { toValue: peekY(), useNativeDriver: false, tension: 55, friction: 10 }).start();
+    cancelAnimation(listY);
+    listY.value = withSpring(peekY(), springs.sheet);
     setSelected(pet);
-    Animated.spring(pinSheetY, { toValue: 1, useNativeDriver: true, tension: 60, friction: 10 }).start();
+    pinProgress.value = withSpring(1, springs.sheet);
   }
 
+  // Closing is a quick ease-out rather than a spring: a spring's long settling
+  // tail would hold the list sheet off screen (it only mounts once `selected`
+  // clears) for a beat after the card has visibly gone.
   function closePinSheet() {
-    Animated.spring(pinSheetY, { toValue: 0, useNativeDriver: true, tension: 60, friction: 10 })
-      .start(() => setSelected(null));
+    pinProgress.value = withTiming(0, { duration: 220, easing: Easing.in(Easing.cubic) }, finished => {
+      // Only if nothing re-opened the sheet mid-close.
+      if (finished) runOnJS(setSelected)(null);
+    });
   }
 
   /**
@@ -451,6 +471,7 @@ export function MapScreen() {
       // Confirm on the button itself, then get out of the way. An Alert for a
       // one-tap action would cost a second tap to dismiss.
       setLoggedId(petId);
+      hapticSuccess();
       loggedTimer.current = setTimeout(() => {
         setLoggedId(null);
         // Only dismiss if this is still the cat on screen — the user may have
@@ -472,35 +493,41 @@ export function MapScreen() {
 
   // ── Pan gesture ─────────────────────────────────────────────────────────────
 
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => false,
-      onMoveShouldSetPanResponder: (_, gs) =>
-        Math.abs(gs.dy) > 6 && Math.abs(gs.dy) > Math.abs(gs.dx) * 1.5,
-      onPanResponderGrant: () => { listY.stopAnimation(); listY.extractOffset(); },
-      onPanResponderMove: Animated.event([null, { dy: listY }], { useNativeDriver: false }),
-      onPanResponderRelease: (_, gs) => {
-        listY.flattenOffset();
-        const py = Math.max(LIST_FULL - LIST_PEEK - insetsRef.current.bottom, 0);
-        const snapDown = gs.vy > 0.3 || (gs.vy >= -0.1 && gs.dy > py * 0.35);
-        if (snapDown) {
-          setListOpen(false);
-          Animated.spring(listY, { toValue: py, useNativeDriver: false, tension: 55, friction: 10 }).start();
-        } else {
-          setListOpen(true);
-          Animated.spring(listY, { toValue: 0, useNativeDriver: false, tension: 55, friction: 10 }).start();
-        }
-      },
-      onPanResponderTerminate: () => {
-        listY.flattenOffset();
-        const py = Math.max(LIST_FULL - LIST_PEEK - insetsRef.current.bottom, 0);
-        setListOpen(false);
-        Animated.spring(listY, { toValue: py, useNativeDriver: false, tension: 55, friction: 10 }).start();
-      },
+  // Vertical drags on the list header move the sheet; horizontal ones fail the
+  // pan so the filter-chip row can still scroll sideways. Same snap rule as the
+  // PanResponder this replaced: a downward flick, or a slow drag past 35% of the
+  // travel, settles at peek — anything else opens.
+  const listPan = useMemo(() => Gesture.Pan()
+    .activeOffsetY([-6, 6])
+    .failOffsetX([-12, 12])
+    .onStart(() => {
+      cancelAnimation(listY);
+      dragStartY.value = listY.value;
     })
-  ).current;
+    .onUpdate(e => {
+      const py   = peekSV.value;
+      const next = dragStartY.value + e.translationY;
+      // Rubber-band past either end instead of stopping dead.
+      listY.value = next < 0 ? next * 0.25 : next > py ? py + (next - py) * 0.25 : next;
+    })
+    .onEnd((e, success) => {
+      const py = peekSV.value;
+      const vy = e.velocityY / 1000; // px/ms, matching the old thresholds
+      const snapDown = !success || vy > 0.3 || (vy >= -0.1 && e.translationY > py * 0.35);
+      listY.value = withSpring(snapDown ? py : 0, { ...springs.sheet, velocity: e.velocityY });
+      runOnJS(setListOpen)(!snapDown);
+    }),
+  // Shared values and the state setter are stable for the component's life.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  []);
 
-  const pinTranslateY = pinSheetY.interpolate({ inputRange: [0, 1], outputRange: [PIN_SHEET + 60, 0] });
+  const listSheetStyle = useAnimatedStyle(() => ({ transform: [{ translateY: listY.value }] }));
+  const pinSheetStyle  = useAnimatedStyle(() => ({
+    transform: [{ translateY: interpolate(pinProgress.value, [0, 1], [PIN_SHEET + 60, 0]) }],
+  }));
+  const scrimStyle = useAnimatedStyle(() => ({
+    opacity: Math.min(1, Math.max(0, pinProgress.value)),
+  }));
 
   // ── Themed styles ───────────────────────────────────────────────────────────
 
@@ -510,38 +537,55 @@ export function MapScreen() {
     topBar:      { position: 'absolute', left: 0, right: 0, zIndex: 10, paddingHorizontal: 16 },
     topBarInner: {
       flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-      paddingHorizontal: 16, paddingVertical: 10,
-      backgroundColor: isDark ? 'rgba(13, 14, 24, 0.88)' : 'rgba(248, 247, 252, 0.92)',
-      borderRadius: 16, borderWidth: 1, borderColor: colors.border,
+      paddingLeft: 12, paddingRight: 10, paddingVertical: 8,
+      backgroundColor: colors.glass,
+      borderRadius: 20, borderWidth: 1, borderColor: colors.border,
+      shadowColor: '#000', shadowOffset: { width: 0, height: 6 },
+      shadowOpacity: isDark ? 0.35 : 0.08, shadowRadius: 16, elevation: 6,
     },
-    wordmark: { color: colors.textPrimary, letterSpacing: 2 },
+    brand:    { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    logo:     { width: 28, height: 28 },
+    wordmark: { color: colors.textPrimary, fontSize: 24, lineHeight: 28 },
     badge: {
-      paddingHorizontal: 10, paddingVertical: 4,
-      backgroundColor: colors.amberFaint, borderRadius: 20,
-      borderWidth: 1, borderColor: colors.amberBorder,
-      minWidth: 70, alignItems: 'center' as const,
+      paddingHorizontal: 12, paddingVertical: 6,
+      backgroundColor: colors.accentFaint, borderRadius: 20,
+      borderWidth: 1, borderColor: colors.accentBorder,
+      minWidth: 76, alignItems: 'center' as const,
     },
 
+    scrim: { ...StyleSheet.absoluteFillObject, backgroundColor: colors.scrim, zIndex: 19 },
     pinSheet: {
       position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 20,
-      backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24,
+      backgroundColor: colors.surface, borderTopLeftRadius: 28, borderTopRightRadius: 28,
       borderTopWidth: 1, borderTopColor: colors.border, paddingHorizontal: 20, paddingTop: 12,
+      shadowColor: '#000', shadowOffset: { width: 0, height: -6 },
+      shadowOpacity: isDark ? 0.4 : 0.1, shadowRadius: 20, elevation: 16,
     },
-    handle: { width: 36, height: 4, backgroundColor: colors.border, borderRadius: 2, alignSelf: 'center' as const },
+    handle: { width: 40, height: 5, backgroundColor: colors.border, borderRadius: 3, alignSelf: 'center' as const },
     sheetRow:   { flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 20 },
-    sheetThumb: { width: 52, height: 52, borderRadius: 26 },
-    sheetAvatar:   { width: 52, height: 52, borderRadius: 26, alignItems: 'center' as const, justifyContent: 'center' as const },
-    avatarInitial: { fontFamily: 'Inter_700Bold', fontSize: 20, color: colors.onAmber },
+    sheetThumb: { width: 60, height: 60, borderRadius: 18 },
+    sheetAvatar:   { width: 60, height: 60, borderRadius: 18, alignItems: 'center' as const, justifyContent: 'center' as const },
+    avatarInitial: { fontFamily: 'Inter_700Bold', fontSize: 22, color: colors.onAccent },
+    adoptTag: {
+      backgroundColor: colors.violetFaint, paddingHorizontal: 8,
+      paddingVertical: 3, borderRadius: 10,
+    },
     actions:   { flexDirection: 'row', gap: 10 },
     btnOutline: {
-      flex: 1, paddingVertical: 14, borderRadius: 14,
+      flex: 1, paddingVertical: 15, borderRadius: 16, backgroundColor: colors.elevated,
       borderWidth: 1, borderColor: colors.border, alignItems: 'center' as const,
     },
-    btnAmber: { flex: 1, paddingVertical: 14, borderRadius: 14, backgroundColor: colors.amber, alignItems: 'center' as const },
+    btnAccent: {
+      flex: 1, paddingVertical: 15, borderRadius: 16, backgroundColor: colors.accent,
+      alignItems: 'center' as const, justifyContent: 'center' as const,
+      shadowColor: colors.accent, shadowOffset: { width: 0, height: 6 },
+      shadowOpacity: 0.35, shadowRadius: 12, elevation: 6,
+    },
+    loggedRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
 
     listSheet: {
       position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 15,
-      backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24,
+      backgroundColor: colors.surface, borderTopLeftRadius: 28, borderTopRightRadius: 28,
       borderTopWidth: 1, borderTopColor: colors.border, overflow: 'hidden' as const,
     },
     listHeader:    { paddingHorizontal: 20, paddingBottom: 10 },
@@ -551,41 +595,43 @@ export function MapScreen() {
       flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 10,
     },
     searchInput: {
-      flex: 1, height: 38, borderRadius: 10,
+      flex: 1, height: 40, borderRadius: 12,
       backgroundColor: colors.elevated, borderWidth: 1, borderColor: colors.border,
-      paddingHorizontal: 12,
+      paddingHorizontal: 14,
       color: colors.textPrimary, fontFamily: 'Inter_400Regular', fontSize: 14,
     },
     chipRow:        { marginTop: 10, flexGrow: 0 },
     chipRowContent: { flexDirection: 'row', gap: 8, paddingRight: 20 },
-    chip: {
-      paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20,
-      borderWidth: 1, borderColor: colors.border, backgroundColor: colors.elevated,
+    logBtn: {
+      backgroundColor: colors.accent, paddingHorizontal: 16, paddingVertical: 9, borderRadius: 20,
+      shadowColor: colors.accent, shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.35, shadowRadius: 10, elevation: 5,
     },
-    chipOn: { backgroundColor: colors.amberFaint, borderColor: colors.amberBorder },
-    logBtn:     { backgroundColor: colors.amber, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20 },
-    logBtnText: { fontFamily: 'Inter_700Bold', fontSize: 13, color: colors.onAmber },
+    logBtnText: { fontFamily: 'Inter_700Bold', fontSize: 13, color: colors.onAccent },
     catRow: {
       flexDirection: 'row', alignItems: 'center', gap: 12,
       paddingHorizontal: 20, paddingVertical: 13,
       borderTopWidth: 1, borderTopColor: colors.border,
     },
-    catThumb:    { width: 44, height: 44, borderRadius: 22, overflow: 'hidden' as const },
-    catInitial:  { fontFamily: 'Inter_700Bold', fontSize: 16, color: colors.onAmber },
+    catThumb:    { width: 46, height: 46, borderRadius: 14, overflow: 'hidden' as const },
+    catInitial:  { fontFamily: 'Inter_700Bold', fontSize: 16, color: colors.onAccent },
     emptyState:  { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 12 },
+    skeletons:   { paddingHorizontal: 20, paddingTop: 14, gap: 18 },
     staleBadge: {
       paddingHorizontal: 7, paddingVertical: 2, borderRadius: 8,
-      backgroundColor: colors.elevated, borderWidth: 1, borderColor: colors.border,
+      backgroundColor: colors.violetFaint,
     },
     recenterBtn: {
       position: 'absolute' as const, right: 16, zIndex: 12,
-      width: 44, height: 44, borderRadius: 22,
+      width: 46, height: 46, borderRadius: 23,
       alignItems: 'center' as const, justifyContent: 'center' as const,
-      backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border,
-      shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.18, shadowRadius: 6, elevation: 4,
+      backgroundColor: colors.glass, borderWidth: 1, borderColor: colors.border,
+      shadowColor: '#000', shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: isDark ? 0.35 : 0.12, shadowRadius: 10, elevation: 5,
     },
   }), [colors, isDark]);
+
+  const countLabel = queryBounds ? `${pets.length} in view` : 'locating…';
 
   // ── Render ──────────────────────────────────────────────────────────────────
 
@@ -595,7 +641,7 @@ export function MapScreen() {
         ref={mapRef}
         style={StyleSheet.absoluteFill}
         provider={Platform.OS === 'android' ? PROVIDER_GOOGLE : undefined}
-        customMapStyle={Platform.OS === 'android' && isDark ? DARK_MAP_STYLE : undefined}
+        customMapStyle={Platform.OS === 'android' ? (isDark ? DARK_MAP_STYLE : LIGHT_MAP_STYLE) : undefined}
         userInterfaceStyle={isDark ? 'dark' : 'light'}
         initialRegion={FALLBACK_REGION}
         onPress={handleMapPress}
@@ -640,42 +686,61 @@ export function MapScreen() {
       </MapView>
 
       {/* Top bar */}
-      <View style={[styles.topBar, { top: insets.top + 12 }]} pointerEvents="box-none">
+      <Animated.View
+        entering={FadeInDown.delay(80).springify().damping(18)}
+        style={[styles.topBar, { top: insets.top + 12 }]}
+        pointerEvents="box-none"
+      >
         <View style={styles.topBarInner}>
-          <Text style={[t.h3, styles.wordmark]}>prowl</Text>
+          <View style={styles.brand}>
+            <RNImage source={require('../../assets/logo-mark.png')} style={styles.logo} />
+            <Text style={[t.h2, styles.wordmark]}>Prowl</Text>
+          </View>
           <View style={styles.badge}>
             {loading ? (
-              <ActivityIndicator size="small" color={colors.amber} />
+              <ActivityIndicator size="small" color={colors.accent} />
             ) : (
-              <Text style={[t.caption, { color: colors.amber, fontWeight: '700' }]}>
-                {queryBounds ? `${pets.length} in view` : 'locating…'}
-              </Text>
+              // Keyed on the text so each new count fades in rather than snapping.
+              <Animated.Text
+                key={countLabel}
+                entering={FadeIn.duration(220)}
+                style={[t.caption, { color: colors.accent, fontFamily: 'Inter_700Bold' }]}
+              >
+                {countLabel}
+              </Animated.Text>
             )}
           </View>
         </View>
-      </View>
+      </Animated.View>
 
       {/* Recentre. Sits above the peeking list sheet so it clears the summary row,
           and behind it (lower zIndex) so an open sheet simply covers it. */}
       {!selected && (
-        <TouchableOpacity
+        <Animated.View
+          entering={FadeIn.duration(200)}
           style={[styles.recenterBtn, { bottom: insets.bottom + LIST_PEEK + 16 }]}
-          onPress={handleRecenter}
-          disabled={locating}
-          activeOpacity={0.8}
         >
-          {locating
-            ? <ActivityIndicator size="small" color={colors.amber} />
-            : <Text style={{ fontSize: 18, color: colors.amber }}>⌖</Text>}
-        </TouchableOpacity>
+          <PressableScale
+            onPress={handleRecenter}
+            disabled={locating}
+            scaleTo={0.88}
+            style={{ width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center' }}
+          >
+            {locating
+              ? <ActivityIndicator size="small" color={colors.accent} />
+              : <Text style={{ fontSize: 20, color: colors.accent }}>⌖</Text>}
+          </PressableScale>
+        </Animated.View>
       )}
 
       {/* Per-pin quick-action card */}
       {selected && (
         <>
-          <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={closePinSheet} />
+          <Animated.View style={[styles.scrim, scrimStyle]}>
+            <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={closePinSheet} />
+          </Animated.View>
           <Animated.View
-            style={[styles.pinSheet, { paddingBottom: insets.bottom + 16, transform: [{ translateY: pinTranslateY }] }]}
+            style={[styles.pinSheet, { paddingBottom: insets.bottom + 16 }, pinSheetStyle]}
           >
             <View style={[styles.handle, { marginBottom: 16 }]} />
             <View style={styles.sheetRow}>
@@ -683,7 +748,7 @@ export function MapScreen() {
                 <Image
                   source={{ uri: selected.thumbnailSmallUrl ?? selected.thumbnailUrl! }}
                   style={styles.sheetThumb}
-                  contentFit="cover" cachePolicy="memory-disk" transition={150}
+                  contentFit="cover" cachePolicy="memory-disk" transition={200}
                 />
               ) : (
                 <View style={[styles.sheetAvatar, { backgroundColor: selected.color }]}>
@@ -692,13 +757,10 @@ export function MapScreen() {
               )}
               <View style={{ flex: 1 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  <Text style={[t.h2, { color: colors.textPrimary }]}>{selected.name}</Text>
+                  <Text style={[t.h2, { color: colors.textPrimary, flexShrink: 1 }]} numberOfLines={1}>{selected.name}</Text>
                   {selected.status === 'adoptable' && (
-                    <View style={{
-                      backgroundColor: colors.roseFaint, paddingHorizontal: 8,
-                      paddingVertical: 3, borderRadius: 10,
-                    }}>
-                      <Text style={[t.label, { color: colors.rose }]}>adoptable</Text>
+                    <View style={styles.adoptTag}>
+                      <Text style={[t.label, { color: colors.violet }]}>adoptable</Text>
                     </View>
                   )}
                 </View>
@@ -707,31 +769,36 @@ export function MapScreen() {
                   {!!distanceTo(selected) && ` · ${distanceTo(selected)} away`}
                 </Text>
                 {!!selectedStaleLabel && (
-                  <Text style={[t.caption, { color: colors.rose, marginTop: 3 }]}>
+                  <Text style={[t.caption, { color: colors.violet, marginTop: 3 }]}>
                     {selectedStaleLabel} — a sighting would help
                   </Text>
                 )}
               </View>
             </View>
             <View style={styles.actions}>
-              <TouchableOpacity
+              <PressableScale
                 style={styles.btnOutline}
                 onPress={() => { closePinSheet(); nav.navigate('PetDetail', { petId: selected.id }); }}
               >
                 <Text style={[t.bodyMed, { color: colors.textPrimary }]}>View profile</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.btnAmber, (logging || !!loggedId) && { opacity: 0.75 }]}
+              </PressableScale>
+              <PressableScale
+                style={[styles.btnAccent, logging && { opacity: 0.75 }]}
                 onPress={handleISeeThisPet}
                 disabled={logging || !!loggedId}
-                activeOpacity={0.85}
+                haptic
               >
                 {logging
-                  ? <ActivityIndicator size="small" color={colors.onAmber} />
-                  : <Text style={[t.bodyMed, { color: colors.onAmber }]}>
-                      {loggedId === selected.id ? 'Logged ✓' : `I see this ${selected.species}`}
-                    </Text>}
-              </TouchableOpacity>
+                  ? <ActivityIndicator size="small" color={colors.onAccent} />
+                  : loggedId === selected.id
+                    ? (
+                      <View style={styles.loggedRow}>
+                        <SuccessStamp size={20} color={colors.onAccent} checkColor={colors.accent} />
+                        <Text style={[t.bodyMed, { color: colors.onAccent }]}>Logged</Text>
+                      </View>
+                    )
+                    : <Text style={[t.bodyMed, { color: colors.onAccent }]}>{`I see this ${selected.species}`}</Text>}
+              </PressableScale>
             </View>
           </Animated.View>
         </>
@@ -740,107 +807,101 @@ export function MapScreen() {
       {/* Pet list bottom sheet */}
       {!selected && (
         <Animated.View
+          entering={FadeIn.duration(180)}
           style={[
             styles.listSheet,
-            { height: LIST_FULL + insets.bottom, paddingBottom: insets.bottom, transform: [{ translateY: listY }] },
+            { height: LIST_FULL + insets.bottom, paddingBottom: insets.bottom },
+            listSheetStyle,
           ]}
         >
-          <View style={styles.listHeader} {...panResponder.panHandlers}>
-            <TouchableOpacity onPress={toggleList} activeOpacity={0.6} style={styles.handleArea}>
-              <View style={styles.handle} />
-            </TouchableOpacity>
-            <View style={styles.listHeaderRow}>
-              <TouchableOpacity onPress={toggleList} activeOpacity={0.7} style={{ flex: 1 }}>
-                <Text style={[t.bodyMed, { color: colors.textPrimary }]}>
-                  {searchMode
-                    ? (searching ? 'Searching…' : `${listPets.length} match${listPets.length !== 1 ? 'es' : ''}`)
-                    : loading
-                      ? 'Finding pets…'
-                      : listPets.length === 0
-                        ? 'Nothing in this area'
-                        : `${listPets.length} pet${listPets.length !== 1 ? 's' : ''} in view`}
-                </Text>
+          <GestureDetector gesture={listPan}>
+            <View style={styles.listHeader}>
+              <TouchableOpacity onPress={toggleList} activeOpacity={0.6} style={styles.handleArea}>
+                <View style={styles.handle} />
               </TouchableOpacity>
-              <TouchableOpacity style={styles.logBtn} onPress={() => nav.navigate('Camera')} activeOpacity={0.8}>
-                <Text style={styles.logBtnText}>📷  Log sighting</Text>
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.searchRow}>
-              <TextInput
-                style={styles.searchInput}
-                placeholder="Search by name…"
-                placeholderTextColor={colors.textMuted}
-                value={search}
-                onChangeText={setSearch}
-                onFocus={snapToOpen}
-                autoCorrect={false}
-                returnKeyType="search"
-              />
-              {!!search && (
-                <TouchableOpacity onPress={() => setSearch('')} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-                  <Text style={[t.caption, { color: colors.textMuted }]}>Clear</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-
-            {/* Horizontal scroll rather than wrapping: the row holds enough chips
-                to overflow a narrow phone, and a second line would eat into the
-                list, which is the point of the sheet.
-
-                "Mine" is parked, not removed. Identity today is the anonymous
-                session in SecureStore, so it belongs to the install rather than
-                the person: reinstall and your pets stop being yours. The filter
-                itself is fine and stays covered by petFilters.test.ts — restore
-                the chip once signing in links a durable identity. */}
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              style={styles.chipRow}
-              contentContainerStyle={styles.chipRowContent}
-              keyboardShouldPersistTaps="handled"
-            >
-              <TouchableOpacity
-                style={[styles.chip, filters.adoptable && styles.chipOn]}
-                onPress={() => toggleFilter('adoptable')}
-                activeOpacity={0.7}
-              >
-                <Text style={[t.caption, { color: filters.adoptable ? colors.rose : colors.textSecondary }]}>
-                  ♥  Adoptable
-                </Text>
-              </TouchableOpacity>
-
-              {SPECIES_CHIPS.map(sp => {
-                const on = filters.species.includes(sp.value);
-                return (
-                  <TouchableOpacity
-                    key={sp.value}
-                    style={[styles.chip, on && styles.chipOn]}
-                    onPress={() => setFilters(f => toggleSpecies(f, sp.value))}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={[t.caption, { color: on ? colors.amber : colors.textSecondary }]}>
-                      {sp.label}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-
-              {/* Sorting, not filtering — offered only once there is a fix to
-                  sort against, so it can never be on with nothing to do. */}
-              {!!userCoords && (
-                <TouchableOpacity
-                  style={[styles.chip, sortNearest && styles.chipOn]}
-                  onPress={() => setSortNearest(v => !v)}
-                  activeOpacity={0.7}
-                >
-                  <Text style={[t.caption, { color: sortNearest ? colors.amber : colors.textSecondary }]}>
-                    ⌖  Nearest
+              <View style={styles.listHeaderRow}>
+                <TouchableOpacity onPress={toggleList} activeOpacity={0.7} style={{ flex: 1 }}>
+                  <Text style={[t.bodyMed, { color: colors.textPrimary }]}>
+                    {searchMode
+                      ? (searching ? 'Searching…' : `${listPets.length} match${listPets.length !== 1 ? 'es' : ''}`)
+                      : loading
+                        ? 'Finding pets…'
+                        : listPets.length === 0
+                          ? 'Nothing in this area'
+                          : `${listPets.length} pet${listPets.length !== 1 ? 's' : ''} in view`}
                   </Text>
                 </TouchableOpacity>
-              )}
-            </ScrollView>
-          </View>
+                <PressableScale style={styles.logBtn} onPress={() => nav.navigate('Camera')} haptic scaleTo={0.92}>
+                  <Text style={styles.logBtnText}>📷  Log sighting</Text>
+                </PressableScale>
+              </View>
+
+              <View style={styles.searchRow}>
+                <TextInput
+                  style={styles.searchInput}
+                  placeholder="Search by name…"
+                  placeholderTextColor={colors.textMuted}
+                  value={search}
+                  onChangeText={setSearch}
+                  onFocus={snapToOpen}
+                  autoCorrect={false}
+                  returnKeyType="search"
+                />
+                {!!search && (
+                  <Animated.View entering={FadeIn.duration(150)}>
+                    <TouchableOpacity onPress={() => setSearch('')} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                      <Text style={[t.caption, { color: colors.textMuted }]}>Clear</Text>
+                    </TouchableOpacity>
+                  </Animated.View>
+                )}
+              </View>
+
+              {/* Horizontal scroll rather than wrapping: the row holds enough chips
+                  to overflow a narrow phone, and a second line would eat into the
+                  list, which is the point of the sheet.
+
+                  "Mine" is parked, not removed. Identity today is the anonymous
+                  session in SecureStore, so it belongs to the install rather than
+                  the person: reinstall and your pets stop being yours. The filter
+                  itself is fine and stays covered by petFilters.test.ts — restore
+                  the chip once signing in links a durable identity. */}
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.chipRow}
+                contentContainerStyle={styles.chipRowContent}
+                keyboardShouldPersistTaps="handled"
+              >
+                <ToggleChip
+                  on={filters.adoptable}
+                  label="♥  Adoptable"
+                  onPress={() => toggleFilter('adoptable')}
+                  tint={colors.violet} tintFaint={colors.violetFaint} tintBorder={colors.violet}
+                />
+
+                {SPECIES_CHIPS.map(sp => (
+                  <ToggleChip
+                    key={sp.value}
+                    on={filters.species.includes(sp.value)}
+                    label={sp.label}
+                    onPress={() => setFilters(f => toggleSpecies(f, sp.value))}
+                  />
+                ))}
+
+                {/* Sorting, not filtering — offered only once there is a fix to
+                    sort against, so it can never be on with nothing to do. */}
+                {!!userCoords && (
+                  <Animated.View entering={FadeIn.duration(200)}>
+                    <ToggleChip
+                      on={sortNearest}
+                      label="⌖  Nearest"
+                      onPress={() => setSortNearest(v => !v)}
+                    />
+                  </Animated.View>
+                )}
+              </ScrollView>
+            </View>
+          </GestureDetector>
 
           <ScrollView
             scrollEnabled={listOpen}
@@ -853,55 +914,71 @@ export function MapScreen() {
                 <RefreshControl
                   refreshing={refreshing}
                   onRefresh={refetch}
-                  tintColor={colors.amber}
-                  colors={[colors.amber]}
+                  tintColor={colors.accent}
+                  colors={[colors.accent]}
                 />
               )
             }
           >
-            {listPets.map((pet, i) => (
-              <TouchableOpacity
-                key={pet.id}
-                style={[styles.catRow, i === 0 && { borderTopWidth: 1, borderTopColor: colors.border }]}
-                // A search hit is usually off-screen, so tapping it moves the map
-                // there instead of jumping straight to the profile.
-                onPress={() => (searchMode ? goToPet(pet) : nav.navigate('PetDetail', { petId: pet.id }))}
-                activeOpacity={0.72}
-              >
-                {(pet.thumbnailSmallUrl ?? pet.thumbnailUrl) ? (
-                  <Image
-                    source={{ uri: pet.thumbnailSmallUrl ?? pet.thumbnailUrl! }}
-                    style={styles.catThumb}
-                    contentFit="cover" cachePolicy="memory-disk" recyclingKey={pet.id} transition={150}
-                  />
-                ) : (
-                  <View style={[styles.catThumb, { backgroundColor: pet.color, alignItems: 'center', justifyContent: 'center' }]}>
-                    <Text style={styles.catInitial}>{pet.initial}</Text>
-                  </View>
-                )}
-                <View style={{ flex: 1 }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <Text style={[t.bodyMed, { color: colors.textPrimary }]} numberOfLines={1}>
-                      {pet.name}
-                    </Text>
-                    {/* Only pets nobody has logged in a week carry this, so it
-                        stays a signal rather than decoration on every row. */}
-                    {!!freshnessLabel(pet.lastSeenAt) && (
-                      <View style={styles.staleBadge}>
-                        <Text style={[t.label, { color: colors.textSecondary }]}>needs a check-in</Text>
+            {/* The sheet remounts every time the pin card closes; rows already in
+                the list at that moment should just be there, not replay their
+                entrance. Rows that arrive later (panning, filtering) still animate. */}
+            <LayoutAnimationConfig skipEntering>
+              {listPets.map((pet, i) => (
+                <Animated.View key={pet.id} entering={staggerIn(i)} layout={reflow}>
+                  <TouchableOpacity
+                    style={[styles.catRow, i === 0 && { borderTopWidth: 1, borderTopColor: colors.border }]}
+                    // A search hit is usually off-screen, so tapping it moves the map
+                    // there instead of jumping straight to the profile.
+                    onPress={() => (searchMode ? goToPet(pet) : nav.navigate('PetDetail', { petId: pet.id }))}
+                    activeOpacity={0.72}
+                  >
+                    {(pet.thumbnailSmallUrl ?? pet.thumbnailUrl) ? (
+                      <Image
+                        source={{ uri: pet.thumbnailSmallUrl ?? pet.thumbnailUrl! }}
+                        style={styles.catThumb}
+                        contentFit="cover" cachePolicy="memory-disk" recyclingKey={pet.id} transition={200}
+                      />
+                    ) : (
+                      <View style={[styles.catThumb, { backgroundColor: pet.color, alignItems: 'center', justifyContent: 'center' }]}>
+                        <Text style={styles.catInitial}>{pet.initial}</Text>
                       </View>
                     )}
-                  </View>
-                  <Text style={[t.caption, { color: colors.textSecondary, marginTop: 2 }]}>
-                    {!!distanceTo(pet) && `${distanceTo(pet)} · `}
-                    Last seen {timeAgo(pet.lastSeenAt)} · {pet.sightingCount} sightings
-                  </Text>
-                </View>
-                <Text style={[t.caption, { color: colors.textMuted, fontSize: 18 }]}>›</Text>
-              </TouchableOpacity>
-            ))}
+                    <View style={{ flex: 1 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <Text style={[t.bodyMed, { color: colors.textPrimary, flexShrink: 1 }]} numberOfLines={1}>
+                          {pet.name}
+                        </Text>
+                        {/* Only pets nobody has logged in a week carry this, so it
+                            stays a signal rather than decoration on every row. */}
+                        {!!freshnessLabel(pet.lastSeenAt) && (
+                          <View style={styles.staleBadge}>
+                            <Text style={[t.label, { color: colors.violet }]}>needs a check-in</Text>
+                          </View>
+                        )}
+                      </View>
+                      <Text style={[t.caption, { color: colors.textSecondary, marginTop: 2 }]}>
+                        {!!distanceTo(pet) && `${distanceTo(pet)} · `}
+                        Last seen {timeAgo(pet.lastSeenAt)} · {pet.sightingCount} sightings
+                      </Text>
+                    </View>
+                    <Text style={[t.caption, { color: colors.textMuted, fontSize: 18 }]}>›</Text>
+                  </TouchableOpacity>
+                </Animated.View>
+              ))}
+            </LayoutAnimationConfig>
+
+            {/* Skeleton rows while the first results for this view are on their way. */}
+            {listPets.length === 0 && (searchMode ? searching : loading) && (
+              <View style={styles.skeletons}>
+                <SkeletonRow avatar={46} />
+                <SkeletonRow avatar={46} />
+                <SkeletonRow avatar={46} />
+              </View>
+            )}
+
             {listPets.length === 0 && !loading && !searching && (
-              <View style={styles.emptyState}>
+              <Animated.View entering={FadeIn.duration(220)} style={styles.emptyState}>
                 <Text style={[t.body, { color: colors.textMuted, textAlign: 'center' }]}>
                   {searchMode
                     ? `Nothing named “${search.trim()}”.`
@@ -909,7 +986,7 @@ export function MapScreen() {
                       ? 'Nothing here matches those filters.'
                       : `No pets spotted nearby yet.\nUse the button above to add one.`}
                 </Text>
-              </View>
+              </Animated.View>
             )}
             {/* Legal link — required for app store compliance */}
             <TouchableOpacity

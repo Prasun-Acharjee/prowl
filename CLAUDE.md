@@ -78,6 +78,7 @@ src/
   navigation/RootNavigator.tsx   Stack navigator; RootStackParamList is the source of truth for routes
   screens/                       One file per screen (see below)
   components/PetPin.tsx          Map pin visual
+  components/motion.tsx          Shared animation kit (springs, PressableScale, ToggleChip, Skeleton, SuccessStamp)
   hooks/usePets.ts               All React Query data access for pets/sightings
   lib/
     supabase.ts                  Supabase client + anonymous auth (ensureAuth)
@@ -88,7 +89,7 @@ src/
     freshness.ts                 How stale a pet's last sighting is (pure; freshness.test.ts)
     sightings.ts                 One-tap "I see this cat" — position + log_sighting
   context/ThemeContext.tsx       Light/dark theme provider (follows OS scheme)
-  constants/                     colors, typography, mapStyle, legal text
+  constants/                     colors (Coral Dusk), typography, mapStyle (dark + light), legal text
   types/index.ts                 Domain types (Pet, Sighting, Species, PetStatus, PetMatch)
   data/mockData.ts               Mock fixtures (dev/reference only)
 ```
@@ -119,7 +120,12 @@ src/
   `latitude`/`longitude`. To write a point, pass lat/lng to `log_sighting`, or on insert use
   the WKT literal form `` `SRID=4326;POINT(${lng} ${lat})` `` (note: **lng first**).
 - **Theming:** never hard-code colors in components. Pull from `useTheme()`/`useColors()`
-  and the palettes in `src/constants/colors.ts` (there's a full dark + light palette).
+  and the palettes in `src/constants/colors.ts` (the "Coral Dusk" palette, full dark + light).
+  Tokens: `accent` (coral — primary actions, pins seen in the last 24 h), `violet` (pins seen
+  this week, adoptable, "needs a check-in"), `mint` (success), `onAccent` (text on a coral
+  fill — dark ink in both themes, since white on coral fails AA), plus `glass` (chrome over
+  the map), `scrim` and `shimmer`. Placeholder avatar colours come from `avatarColor(id)`;
+  `dashboard/app.js` mirrors the same list and the pin colours, so change them together.
   Typography comes from `src/constants/typography.ts` (`type` presets, DM Serif Display for
   display text, Inter for body). Compute `StyleSheet` objects with `useMemo` off `colors`,
   as the screens do.
@@ -131,6 +137,22 @@ src/
   derivable from the full URL by the `_thumb.jpg` suffix. Map pins/list rows use the small
   thumbnail; detail/hero uses the full one.
 - New routes must be added to `RootStackParamList` in `RootNavigator.tsx` with their params.
+- **Motion** goes through `src/components/motion.tsx` and **react-native-reanimated**, so it
+  runs on the UI thread. Use its `springs` rather than inventing new configs, `PressableScale`
+  for anything that reads as a button (`haptic` only on primary actions), `ToggleChip` for
+  filter/choice chips, `staggerIn(i)` + `reflow` for list rows, `Skeleton`/`SkeletonRow` for
+  loading states, and `SuccessOverlay` + `SUCCESS_HOLD_MS` before navigating away from a save.
+  Reanimated's springs and layout animations respect the OS reduce-motion setting by default;
+  infinite loops must check `useReducedMotion()` themselves.
+- **Reanimated is pinned to 3.x on purpose.** The app runs the old architecture
+  (`newArchEnabled: false` in `app.config.js` and `android/gradle.properties`), and Reanimated 4
+  requires the New Architecture. Don't bump it without switching architecture first. The Babel
+  plugin is added automatically by `babel-preset-expo`.
+- **Map markers don't animate on Android.** Google Maps rasterizes each marker to a bitmap
+  (see `useMarkerSettle` in `MapScreen`), so `PetPin`'s drop-in and sonar ring are iOS-only.
+  Don't add animation inside a marker without that gate.
+- The map list sheet is dragged with a Gesture Handler `Gesture.Pan`, which needs the
+  `GestureHandlerRootView` in `App.tsx`.
 
 ## Backend (`supabase/migrations/`)
 
@@ -182,6 +204,16 @@ Migration history (read these before touching schema):
 - If you add a column that clients read, expose it through `pets_geo`/`sightings_geo` **and**
   the relevant RPC, then add it to the row interface + mapper in `usePets.ts`. The mapper
   uses `?? default` fallbacks so older clients tolerate pre-migration schemas — keep that.
+
+## Logo & icons
+
+The logo is the "Ear pin": a cat's head that tapers into a map-pin point. Sources are
+`assets/logo-mark.svg` (transparent mark, also copied to `dashboard/logo-mark.svg`),
+`assets/icon.svg` (full-bleed app icon) and `assets/adaptive-icon.svg` (Android foreground,
+inside the 66/108 safe zone). The PNGs in `assets/` and the committed Android launcher
+(`mipmap-*`) and splash (`drawable-*/splashscreen_logo.png`) images are rasterized from the
+same drawing — regenerate all of them together if the mark changes, since `android/` is
+committed and a prebuild won't do it for you. Splash and icon backgrounds are `#160F1F`.
 
 ## Admin dashboard (`dashboard/`)
 

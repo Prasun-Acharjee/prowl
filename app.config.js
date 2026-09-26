@@ -6,7 +6,7 @@ export default {
     newArchEnabled: false,
     orientation: 'portrait',
     userInterfaceStyle: 'automatic',
-    backgroundColor: '#0D0E18',
+    backgroundColor: '#160F1F',
     icon: './assets/icon.png',
     ios: {
       supportsTablet: false,
@@ -19,7 +19,7 @@ export default {
     android: {
       adaptiveIcon: {
         foregroundImage: './assets/adaptive-icon.png',
-        backgroundColor: '#0D0E18',
+        backgroundColor: '#160F1F',
       },
       package: 'com.prowl.app',
       config: {
@@ -43,6 +43,9 @@ export default {
       ['expo-image-picker', { photosPermission: 'Allow Prowl to access your photos to attach to sightings.' }],
       ['expo-location', { locationWhenInUsePermission: 'Allow Prowl to use your location to find nearby pets and log sightings.' }],
       'expo-font',
+      // Only read by a fresh `expo prebuild` — android/ is committed, so the
+      // same colour and image are also set in its res/ directly.
+      ['expo-splash-screen', { image: './assets/splash-icon.png', imageWidth: 180, backgroundColor: '#160F1F' }],
     ],
     extra: {
       eas: {

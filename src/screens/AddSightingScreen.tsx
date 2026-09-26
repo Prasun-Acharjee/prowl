@@ -4,6 +4,7 @@ import {
   ActivityIndicator, Alert, Keyboard, Platform,
 } from 'react-native';
 import { Image } from 'expo-image';
+import Animated, { FadeIn } from 'react-native-reanimated';
 import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
@@ -12,12 +13,13 @@ import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { useQueryClient } from '@tanstack/react-query';
 import { useTheme } from '../context/ThemeContext';
 import { type as t } from '../constants/typography';
-import { DARK_MAP_STYLE } from '../constants/mapStyle';
+import { DARK_MAP_STYLE, LIGHT_MAP_STYLE } from '../constants/mapStyle';
 import { supabase } from '../lib/supabase';
 import { uploadPhoto } from '../lib/storage';
 import { extractExifLocation } from '../lib/exif';
 import { petKeys } from '../hooks/usePets';
 import { RootStackParamList } from '../navigation/RootNavigator';
+import { PressableScale, SuccessOverlay, photoSettle, hapticSuccess, SUCCESS_HOLD_MS } from '../components/motion';
 
 type Route = RouteProp<RootStackParamList, 'AddSighting'>;
 
@@ -38,6 +40,10 @@ export function AddSightingScreen() {
   const [searching, setSearching]     = useState(false);
   const [uploading, setUploading]     = useState(false);
   const [note, setNote]               = useState('');
+  // Confirmation shown for a beat after the save, before going back.
+  const [saved, setSaved]             = useState(false);
+  const savedTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(savedTimer.current), []);
 
   useEffect(() => {
     (async () => {
@@ -169,7 +175,9 @@ export function AddSightingScreen() {
         qc.invalidateQueries({ queryKey: ['pets', 'bounds'] }),
       ]);
 
-      nav.goBack();
+      hapticSuccess();
+      setSaved(true);
+      savedTimer.current = setTimeout(() => nav.goBack(), SUCCESS_HOLD_MS);
     } catch (err: any) {
       Alert.alert('Failed to save', err.message);
     } finally {
@@ -218,22 +226,22 @@ export function AddSightingScreen() {
       paddingHorizontal: 12, color: colors.textPrimary, fontFamily: 'Inter_400Regular', fontSize: 14,
     },
     searchBtn: {
-      backgroundColor: colors.amber, borderRadius: 10,
+      backgroundColor: colors.accent, borderRadius: 12,
       paddingHorizontal: 14, height: 40,
       alignItems: 'center' as const, justifyContent: 'center' as const, minWidth: 64,
     },
-    searchBtnText: { fontFamily: 'Inter_700Bold', fontSize: 13, color: colors.onAmber },
+    searchBtnText: { fontFamily: 'Inter_700Bold', fontSize: 13, color: colors.onAccent },
     mapContainer: { flex: 1, position: 'relative' as const },
     pinOuter: {
       width: 28, height: 28, borderRadius: 14,
-      backgroundColor: colors.amber, alignItems: 'center' as const, justifyContent: 'center' as const,
+      backgroundColor: colors.accent, alignItems: 'center' as const, justifyContent: 'center' as const,
       borderWidth: 3, borderColor: '#fff',
       shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.4, shadowRadius: 4, elevation: 5,
     },
-    pinInner: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.onAmber },
+    pinInner: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.onAccent },
     locationFab: {
       position: 'absolute' as const, bottom: 52, right: 14,
-      width: 42, height: 42, borderRadius: 21,
+      width: 46, height: 46, borderRadius: 23,
       backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border,
       alignItems: 'center' as const, justifyContent: 'center' as const,
       shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.3, shadowRadius: 4, elevation: 4,
@@ -261,8 +269,8 @@ export function AddSightingScreen() {
         <Text style={[t.bodyMed, { color: colors.textPrimary }]}>Add photo</Text>
         <TouchableOpacity onPress={handleSave} disabled={!canSave} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
           {uploading
-            ? <ActivityIndicator size="small" color={colors.amber} />
-            : <Text style={[t.bodyMed, { color: canSave ? colors.amber : colors.textMuted }]}>Save</Text>}
+            ? <ActivityIndicator size="small" color={colors.accent} />
+            : <Text style={[t.bodyMed, { color: canSave ? colors.accent : colors.textMuted }]}>Save</Text>}
         </TouchableOpacity>
       </View>
 
@@ -270,16 +278,18 @@ export function AddSightingScreen() {
       <TouchableOpacity style={styles.photoArea} onPress={handlePickPhoto} activeOpacity={0.85}>
         {photoUri ? (
           <>
-            <Image source={{ uri: photoUri }} style={StyleSheet.absoluteFill} contentFit="cover" />
+            <Animated.View key={photoUri} entering={photoSettle} style={StyleSheet.absoluteFill}>
+              <Image source={{ uri: photoUri }} style={StyleSheet.absoluteFill} contentFit="cover" />
+            </Animated.View>
             <View style={styles.changeOverlay}>
               <Text style={styles.changeText}>Change photo</Text>
             </View>
           </>
         ) : (
-          <View style={styles.photoPlaceholder}>
+          <Animated.View entering={FadeIn.duration(240)} style={styles.photoPlaceholder}>
             <Text style={{ fontSize: 40 }}>📷</Text>
             <Text style={[t.body, { color: colors.textMuted, marginTop: 10 }]}>Tap to add a photo (optional)</Text>
-          </View>
+          </Animated.View>
         )}
       </TouchableOpacity>
 
@@ -309,11 +319,11 @@ export function AddSightingScreen() {
           autoCorrect={false}
           autoCapitalize="none"
         />
-        <TouchableOpacity style={styles.searchBtn} onPress={handleSearch} disabled={searching} activeOpacity={0.8}>
+        <PressableScale style={styles.searchBtn} onPress={handleSearch} disabled={searching} scaleTo={0.93}>
           {searching
-            ? <ActivityIndicator size="small" color={colors.onAmber} />
+            ? <ActivityIndicator size="small" color={colors.onAccent} />
             : <Text style={styles.searchBtnText}>Search</Text>}
-        </TouchableOpacity>
+        </PressableScale>
       </View>
 
       {/* Map */}
@@ -322,7 +332,7 @@ export function AddSightingScreen() {
           ref={mapRef}
           style={StyleSheet.absoluteFill}
           provider={Platform.OS === 'android' ? PROVIDER_GOOGLE : undefined}
-          customMapStyle={Platform.OS === 'android' && isDark ? DARK_MAP_STYLE : undefined}
+          customMapStyle={Platform.OS === 'android' ? (isDark ? DARK_MAP_STYLE : LIGHT_MAP_STYLE) : undefined}
           userInterfaceStyle={isDark ? 'dark' : 'light'}
           initialRegion={{ latitude: defaultLat, longitude: defaultLng, latitudeDelta: 0.012, longitudeDelta: 0.012 }}
           onPress={handleMapPress}
@@ -337,9 +347,9 @@ export function AddSightingScreen() {
           </Marker>
         </MapView>
 
-        <TouchableOpacity style={styles.locationFab} onPress={handleUseMyLocation} activeOpacity={0.8}>
+        <PressableScale style={styles.locationFab} onPress={handleUseMyLocation} scaleTo={0.88}>
           <Text style={{ fontSize: 18 }}>📍</Text>
-        </TouchableOpacity>
+        </PressableScale>
 
         <View style={styles.hint} pointerEvents="none">
           <Text style={styles.hintText}>Tap map or drag pin to set location</Text>
@@ -354,6 +364,8 @@ export function AddSightingScreen() {
           <Text style={[t.caption, { color: colors.textMuted }]}>Determining location…</Text>
         )}
       </View>
+
+      {saved && <SuccessOverlay label="Photo added" />}
     </View>
   );
 }

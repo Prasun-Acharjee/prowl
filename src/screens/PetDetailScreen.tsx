@@ -1,10 +1,14 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
   ActivityIndicator, Alert, Linking, TextInput, Platform, Share,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
+import Animated, {
+  Extrapolation, FadeIn, FadeInDown, interpolate, useAnimatedScrollHandler,
+  useAnimatedStyle, useSharedValue,
+} from 'react-native-reanimated';
 import ImageViewing from 'react-native-image-viewing';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
@@ -24,6 +28,11 @@ import {
 } from '../hooks/useModeration';
 import { Sighting } from '../types';
 import { RootStackParamList } from '../navigation/RootNavigator';
+import {
+  PressableScale, Skeleton, SkeletonRow, SuccessStamp, staggerIn, photoSettle, hapticSuccess,
+} from '../components/motion';
+
+const HERO_MIN = 320;
 
 type Route = RouteProp<RootStackParamList, 'PetDetail'>;
 type Nav   = StackNavigationProp<RootStackParamList, 'PetDetail'>;
@@ -126,6 +135,32 @@ export function PetDetailScreen() {
   const [editDesc, setEditDesc]           = useState('');
   const [savingEdit, setSavingEdit]       = useState(false);
   const [placeName, setPlaceName]         = useState<string | null>(null);
+  // Brief "Logged" stamp on the CTA after a one-tap sighting.
+  const [justLogged, setJustLogged]       = useState(false);
+  const loggedTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(loggedTimer.current), []);
+
+  // ── Scroll-linked hero ──────────────────────────────────────────────────────
+  // The photo drifts at half speed as the page scrolls (and stretches on iOS
+  // overscroll); the floating nav bar fades to a solid surface with the pet's
+  // name once the hero has scrolled away, so its buttons never lose contrast.
+  const scrollY = useSharedValue(0);
+  const heroH   = useSharedValue(HERO_MIN);
+  const onScroll = useAnimatedScrollHandler(e => { scrollY.value = e.contentOffset.y; });
+
+  const parallax = useAnimatedStyle(() => {
+    const y = scrollY.value;
+    return y >= 0
+      ? { transform: [{ translateY: y * 0.45 }] }
+      : { transform: [{ translateY: y / 2 }, { scale: 1 + -y / heroH.value }] };
+  });
+  const barSolid = useAnimatedStyle(() => ({
+    opacity: interpolate(scrollY.value, [heroH.value - 140, heroH.value - 80], [0, 1], Extrapolation.CLAMP),
+  }));
+  const barTitle = useAnimatedStyle(() => {
+    const p = interpolate(scrollY.value, [heroH.value - 110, heroH.value - 60], [0, 1], Extrapolation.CLAMP);
+    return { opacity: p, transform: [{ translateY: (1 - p) * 8 }] };
+  });
 
   // "Last seen here" says nothing a map pin does not. A street or neighbourhood
   // name is what someone would actually repeat to a friend, so resolve one —
@@ -180,47 +215,62 @@ export function PetDetailScreen() {
 
   const styles = useMemo(() => StyleSheet.create({
     root:     { flex: 1, backgroundColor: colors.bg },
-    hero:     { minHeight: 220, paddingHorizontal: 20, paddingBottom: 24, overflow: 'hidden' as const },
-    heroNav:  { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+    hero:     {
+      minHeight: HERO_MIN, paddingHorizontal: 20, paddingBottom: 26,
+      justifyContent: 'flex-end' as const, overflow: 'hidden' as const,
+    },
+    navBar:   { position: 'absolute' as const, top: 0, left: 0, right: 0, zIndex: 10, paddingHorizontal: 16, paddingBottom: 10 },
+    navSolid: { ...StyleSheet.absoluteFillObject, backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border },
+    navRow:   { flexDirection: 'row', alignItems: 'center', gap: 10 },
+    navTitle: { flex: 1 },
+    // Dark glass reads on a photo, a flat colour, and either theme's surface.
     heroPill: {
       flexDirection: 'row', alignItems: 'center', gap: 6,
-      backgroundColor: 'rgba(255,255,255,0.22)',
-      paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20,
-      minWidth: 44, justifyContent: 'center' as const,
+      backgroundColor: 'rgba(22, 15, 31, 0.46)',
+      paddingHorizontal: 12, height: 38, borderRadius: 19,
+      minWidth: 38, justifyContent: 'center' as const,
     },
+    pillText:  { fontSize: 13, color: '#FFFFFF', fontFamily: 'Inter_500Medium' },
+    pillIcon:  { fontSize: 15, color: '#FFFFFF' },
     heroMeta:  { marginTop: 12 },
-    heroName:  { fontFamily: 'DMSerifDisplay_400Regular', fontSize: 44, lineHeight: 50 },
-    heroGlyph: { position: 'absolute' as const, right: -10, bottom: -20, fontFamily: 'DMSerifDisplay_400Regular', fontSize: 180, color: 'rgba(13, 14, 24, 0.1)', lineHeight: 200 },
-    scroll:    { flex: 1 },
-    statsRow:  { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: colors.border },
-    stat:      { flex: 1, alignItems: 'center' as const, paddingVertical: 20, gap: 4 },
+    heroName:  { fontFamily: 'DMSerifDisplay_400Regular', fontSize: 46, lineHeight: 52 },
+    heroGlyph: { position: 'absolute' as const, right: -10, bottom: -20, fontFamily: 'DMSerifDisplay_400Regular', fontSize: 200, color: 'rgba(22, 15, 31, 0.12)', lineHeight: 220 },
+    sheet:     {
+      marginTop: -22, borderTopLeftRadius: 26, borderTopRightRadius: 26,
+      backgroundColor: colors.bg, paddingTop: 6,
+    },
+    statsRow:  {
+      flexDirection: 'row', marginHorizontal: 16, marginTop: 10,
+      backgroundColor: colors.surface, borderRadius: 20, borderWidth: 1, borderColor: colors.border,
+    },
+    stat:      { flex: 1, alignItems: 'center' as const, paddingVertical: 18, gap: 4 },
     statBorder:{ borderLeftWidth: 1, borderRightWidth: 1, borderColor: colors.border },
     section:   { paddingHorizontal: 20, paddingTop: 24 },
     staleStrip: {
-      marginHorizontal: 20, marginTop: 20, padding: 14, borderRadius: 14,
-      backgroundColor: colors.elevated, borderWidth: 1, borderColor: colors.border,
+      marginHorizontal: 16, marginTop: 16, padding: 14, borderRadius: 16,
+      backgroundColor: colors.violetFaint,
     },
     directionsRow: {
       flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-      paddingHorizontal: 20, paddingVertical: 16,
-      borderBottomWidth: 1, borderBottomColor: colors.border,
+      marginHorizontal: 16, marginTop: 12, paddingHorizontal: 16, paddingVertical: 16,
+      backgroundColor: colors.surface, borderRadius: 16, borderWidth: 1, borderColor: colors.border,
     },
     timelineRow:      { flexDirection: 'row', gap: 14 },
     timelineLine:     { alignItems: 'center' as const, width: 12 },
-    timelineDot:      { width: 10, height: 10, borderRadius: 5, marginTop: 5 },
-    timelineConnector:{ flex: 1, width: 1, backgroundColor: colors.border, marginTop: 4 },
-    sightingPhoto:    { width: '100%' as any, height: 180, borderRadius: 12, marginBottom: 10, backgroundColor: colors.elevated },
+    timelineDot:      { width: 12, height: 12, borderRadius: 6, marginTop: 4, borderWidth: 2, borderColor: colors.bg },
+    timelineConnector:{ flex: 1, width: 2, borderRadius: 1, backgroundColor: colors.border, marginTop: 4 },
+    sightingPhoto:    { width: '100%' as any, height: 190, borderRadius: 16, marginBottom: 10, backgroundColor: colors.elevated },
     adoptBanner: {
-      marginHorizontal: 20, marginTop: 24, padding: 16, borderRadius: 16,
-      backgroundColor: colors.roseFaint,
+      marginHorizontal: 16, marginTop: 16, padding: 16, borderRadius: 20,
+      backgroundColor: colors.violetFaint, borderWidth: 1, borderColor: colors.violetFaint,
     },
     adoptBtn: {
-      marginTop: 14, backgroundColor: colors.rose, paddingVertical: 14,
-      borderRadius: 12, alignItems: 'center' as const,
+      marginTop: 14, backgroundColor: colors.violet, paddingVertical: 14,
+      borderRadius: 14, alignItems: 'center' as const,
     },
     adoptedStrip: {
-      marginHorizontal: 20, marginTop: 24, padding: 14, borderRadius: 16,
-      backgroundColor: colors.amberFaint, alignItems: 'center' as const,
+      marginHorizontal: 16, marginTop: 16, padding: 14, borderRadius: 20,
+      backgroundColor: colors.accentFaint, alignItems: 'center' as const,
     },
     cta:     { paddingHorizontal: 20, paddingTop: 12, backgroundColor: colors.surface, borderTopWidth: 1, borderTopColor: colors.border },
     editInput: {
@@ -237,13 +287,16 @@ export function PetDetailScreen() {
     ctaRow:  { flexDirection: 'row', gap: 10 },
     ctaBtnOutline: {
       flex: 1, paddingVertical: 16, borderRadius: 16, alignItems: 'center' as const,
-      borderWidth: 1, borderColor: colors.border,
+      backgroundColor: colors.elevated, borderWidth: 1, borderColor: colors.border,
     },
     ctaBtn: {
-      flex: 1, backgroundColor: colors.amber, paddingVertical: 16, borderRadius: 16, alignItems: 'center' as const,
-      shadowColor: colors.amber, shadowOffset: { width: 0, height: 4 },
-      shadowOpacity: 0.35, shadowRadius: 12, elevation: 6,
+      flex: 1, backgroundColor: colors.accent, paddingVertical: 16, borderRadius: 16,
+      alignItems: 'center' as const, justifyContent: 'center' as const,
+      shadowColor: colors.accent, shadowOffset: { width: 0, height: 6 },
+      shadowOpacity: 0.35, shadowRadius: 14, elevation: 6,
     },
+    loggedRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    loadingPad: { paddingHorizontal: 20, paddingTop: 28, gap: 22 },
   }), [colors]);
 
   // ── Handlers ─────────────────────────────────────────────────────────────────
@@ -429,6 +482,10 @@ export function PetDetailScreen() {
     try {
       await logSightingHere(pet.id);
       await qc.invalidateQueries({ queryKey: ['pets'] });
+      hapticSuccess();
+      setJustLogged(true);
+      clearTimeout(loggedTimer.current);
+      loggedTimer.current = setTimeout(() => setJustLogged(false), 1400);
     } catch (err: any) {
       Alert.alert('Error', err.message);
     } finally {
@@ -510,8 +567,14 @@ export function PetDetailScreen() {
 
   if (petLoading || sightingsLoading) {
     return (
-      <View style={{ flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center' }}>
-        <ActivityIndicator color={colors.amber} />
+      <View style={styles.root}>
+        <Skeleton height={HERO_MIN + insets.top} radius={0} />
+        <View style={styles.loadingPad}>
+          <Skeleton height={76} radius={20} />
+          <SkeletonRow avatar={12} />
+          <Skeleton height={160} radius={16} />
+          <SkeletonRow avatar={12} />
+        </View>
       </View>
     );
   }
@@ -522,249 +585,286 @@ export function PetDetailScreen() {
 
   return (
     <View style={styles.root}>
-      {/* Hero */}
-      <View style={[styles.hero, { backgroundColor: pet.color, paddingTop: insets.top + 10 }]}>
-        {pet.thumbnailUrl ? (
-          <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={0.92} onPress={() => setViewerIndex(0)}>
-            <Image
-              source={{ uri: pet.thumbnailUrl }}
-              style={StyleSheet.absoluteFill}
-              contentFit="cover" cachePolicy="memory-disk" priority="high" transition={200}
-            />
-            <LinearGradient colors={['transparent', 'rgba(0,0,0,0.72)']} style={StyleSheet.absoluteFill} />
-          </TouchableOpacity>
-        ) : (
-          <Text style={styles.heroGlyph}>{pet.initial}</Text>
-        )}
-
-        <View style={styles.heroNav}>
-          <TouchableOpacity onPress={() => nav.goBack()} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+      {/* Floating nav — outside the scroll so back / share / edit / delete stay
+          on screen at every scroll position, as they did with the fixed hero. */}
+      <View style={[styles.navBar, { paddingTop: insets.top + 10 }]} pointerEvents="box-none">
+        <Animated.View style={[styles.navSolid, barSolid]} pointerEvents="none" />
+        <View style={styles.navRow} pointerEvents="box-none">
+          <PressableScale onPress={() => nav.goBack()} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }} scaleTo={0.9}>
             <View style={styles.heroPill}>
-              <Text style={{ fontSize: 14, color: 'rgba(13,14,24,0.85)', fontFamily: 'Inter_700Bold' }}>←</Text>
-              <Text style={{ fontSize: 13, color: 'rgba(13,14,24,0.85)', fontFamily: 'Inter_600SemiBold' }}>Back</Text>
+              <Text style={[styles.pillText, { fontFamily: 'Inter_700Bold' }]}>←</Text>
+              <Text style={styles.pillText}>Back</Text>
             </View>
-          </TouchableOpacity>
+          </PressableScale>
+
+          <Animated.View style={[styles.navTitle, barTitle]} pointerEvents="none">
+            <Text style={[t.bodyMed, { color: colors.textPrimary }]} numberOfLines={1}>{pet.name}</Text>
+          </Animated.View>
 
           <View style={{ flexDirection: 'row', gap: 8 }}>
             {/* Sharing is for everyone; edit and delete are the creator's (00006). */}
-            <TouchableOpacity onPress={handleShare} hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}>
-              <View style={styles.heroPill}><Text style={{ fontSize: 15 }}>↗</Text></View>
-            </TouchableOpacity>
+            <PressableScale onPress={handleShare} hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }} scaleTo={0.88}>
+              <View style={styles.heroPill}><Text style={styles.pillIcon}>↗</Text></View>
+            </PressableScale>
             {ownsPet && (
               <>
-                <TouchableOpacity onPress={startEdit} hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}>
-                  <View style={styles.heroPill}><Text style={{ fontSize: 15 }}>✎</Text></View>
-                </TouchableOpacity>
-                <TouchableOpacity onPress={handleDelete} disabled={deleting} hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}>
+                <PressableScale onPress={startEdit} hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }} scaleTo={0.88}>
+                  <View style={styles.heroPill}><Text style={styles.pillIcon}>✎</Text></View>
+                </PressableScale>
+                <PressableScale onPress={handleDelete} disabled={deleting} hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }} scaleTo={0.88}>
                   <View style={styles.heroPill}>
                     {deleting
-                      ? <ActivityIndicator size="small" color="rgba(13,14,24,0.7)" />
+                      ? <ActivityIndicator size="small" color="#FFFFFF" />
                       : <Text style={{ fontSize: 15 }}>🗑</Text>}
                   </View>
-                </TouchableOpacity>
+                </PressableScale>
               </>
             )}
           </View>
         </View>
-
-        <View style={styles.heroMeta}>
-          <Text style={[t.label, { color: 'rgba(255,255,255,0.65)', marginBottom: 6 }]}>
-            community {pet.species}
-          </Text>
-          <Text style={[styles.heroName, { color: '#FFFFFF' }]}>{pet.name}</Text>
-          <Text style={[t.caption, { color: 'rgba(255,255,255,0.7)', marginTop: 4 }]}>
-            First spotted {fmtDate(pet.firstSeenAt)}
-          </Text>
-        </View>
       </View>
 
-      <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
-        {/* Stats */}
-        <View style={styles.statsRow}>
-          <View style={styles.stat}>
-            <Text style={[t.count, { color: colors.amber }]}>{pet.sightingCount}</Text>
-            <Text style={[t.label, { color: colors.textMuted }]}>sightings</Text>
-          </View>
-          <View style={[styles.stat, styles.statBorder]}>
-            <Text style={[t.count, { color: colors.textPrimary }]}>{monthsKnown(pet.firstSeenAt)}</Text>
-            <Text style={[t.label, { color: colors.textMuted }]}>months known</Text>
-          </View>
-          <View style={styles.stat}>
-            <Text style={[t.body, { color: colors.rose, fontFamily: fonts.bodyMedium }]}>
-              {timeAgo(pet.lastSeenAt)}
-            </Text>
-            <Text style={[t.label, { color: colors.textMuted }]}>last sighting</Text>
-          </View>
-        </View>
-
-        {/* Nobody has logged this pet in a while. Phrased as a gap in reporting,
-            and paired with the action that closes it — the CTA below. */}
-        {!!staleLabel && (
-          <View style={styles.staleStrip}>
-            <Text style={[t.bodyMed, { color: colors.textPrimary }]}>
-              👀  {staleLabel}
-            </Text>
-            <Text style={[t.caption, { color: colors.textSecondary, marginTop: 4 }]}>
-              If you spot {pet.name}, logging it keeps the map honest.
-            </Text>
-          </View>
-        )}
-
-        {/* Walk-there row. Sits directly under the stats because "last seen 2h ago"
-            is the line that makes someone want to go and look. */}
-        <TouchableOpacity style={styles.directionsRow} onPress={handleDirections} activeOpacity={0.7}>
-          <Text style={[t.bodyMed, { color: colors.textPrimary }]} numberOfLines={1}>
-            📍  {placeName ? `Last seen near ${placeName}` : 'Last seen here'}
-          </Text>
-          <Text style={[t.caption, { color: colors.amber }]}>Directions  ›</Text>
-        </TouchableOpacity>
-
-        {pet.status === 'adoptable' && (
-          <View style={styles.adoptBanner}>
-            <Text style={[t.bodyMed, { color: colors.rose }]}>♥  Looking for a home</Text>
-            <Text style={[t.caption, { color: colors.textSecondary, marginTop: 6 }]}>
-              {pet.name} is ready to be adopted. Reach out to the caretaker to learn more.
-            </Text>
-            {!!pet.adoptionContact?.trim() && (
-              <TouchableOpacity style={styles.adoptBtn} onPress={handleAdoptInterest} activeOpacity={0.85}>
-                <Text style={[t.bodyMed, { color: '#FFFFFF' }]}>I'm interested</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-        )}
-
-        {pet.status === 'adopted' && (
-          <View style={styles.adoptedStrip}>
-            <Text style={[t.bodyMed, { color: colors.textPrimary }]}>🎉  {pet.name} found a home!</Text>
-          </View>
-        )}
-
-        {editing && (
-          <View style={styles.section}>
-            <Text style={[t.label, { color: colors.textMuted, marginBottom: 8 }]}>Name</Text>
-            <TextInput
-              style={styles.editInput}
-              value={editName}
-              onChangeText={setEditName}
-              placeholder="e.g. Miso"
-              placeholderTextColor={colors.textMuted}
-              maxLength={60}
-            />
-            <Text style={[t.label, { color: colors.textMuted, marginTop: 16, marginBottom: 8 }]}>Description</Text>
-            <TextInput
-              style={[styles.editInput, { minHeight: 88, textAlignVertical: 'top' }]}
-              value={editDesc}
-              onChangeText={setEditDesc}
-              placeholder="Markings, temperament, where they usually sit…"
-              placeholderTextColor={colors.textMuted}
-              maxLength={500}
-              multiline
-            />
-            <View style={[styles.ctaRow, { marginTop: 14 }]}>
-              <TouchableOpacity
-                style={styles.ctaBtnOutline}
-                onPress={() => setEditing(false)}
-                disabled={savingEdit}
-                activeOpacity={0.8}
-              >
-                <Text style={[t.bodyMed, { color: colors.textPrimary }]}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.adoptBtn, { flex: 1, opacity: savingEdit ? 0.5 : 1 }]}
-                onPress={saveEdit}
-                disabled={savingEdit}
-                activeOpacity={0.85}
-              >
-                {savingEdit
-                  ? <ActivityIndicator color="#FFFFFF" />
-                  : <Text style={[t.bodyMed, { color: '#FFFFFF' }]}>Save</Text>}
-              </TouchableOpacity>
-            </View>
-          </View>
-        )}
-
-        {!editing && pet.description && (
-          <View style={styles.section}>
-            <Text style={[t.body, { color: colors.textSecondary, lineHeight: 24 }]}>{pet.description}</Text>
-          </View>
-        )}
-
-        {/* Sightings timeline */}
-        <View style={styles.section}>
-          <Text style={[t.label, { color: colors.textMuted, marginBottom: 16 }]}>Recent sightings</Text>
-          {sightings.length === 0 ? (
-            <Text style={[t.body, { color: colors.textMuted }]}>No sightings logged yet.</Text>
+      <Animated.ScrollView
+        style={{ flex: 1 }}
+        showsVerticalScrollIndicator={false}
+        onScroll={onScroll}
+        scrollEventThrottle={16}
+      >
+        {/* Hero */}
+        <View
+          style={[styles.hero, { backgroundColor: pet.color, paddingTop: insets.top + 64 }]}
+          onLayout={e => { heroH.value = e.nativeEvent.layout.height; }}
+        >
+          {pet.thumbnailUrl ? (
+            <Animated.View style={[StyleSheet.absoluteFill, parallax]}>
+              <Animated.View entering={photoSettle} style={StyleSheet.absoluteFill}>
+                <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={0.92} onPress={() => setViewerIndex(0)}>
+                  <Image
+                    source={{ uri: pet.thumbnailUrl }}
+                    style={StyleSheet.absoluteFill}
+                    contentFit="cover" cachePolicy="memory-disk" priority="high" transition={200}
+                  />
+                  <LinearGradient
+                    colors={['rgba(22,15,31,0.35)', 'transparent', 'rgba(22,15,31,0.8)']}
+                    locations={[0, 0.35, 1]}
+                    style={StyleSheet.absoluteFill}
+                  />
+                </TouchableOpacity>
+              </Animated.View>
+            </Animated.View>
           ) : (
-            sightings.map((s, i) => (
-              <View key={s.id} style={styles.timelineRow}>
-                <View style={styles.timelineLine}>
-                  <View style={[styles.timelineDot, { backgroundColor: i === 0 ? colors.amber : colors.border }]} />
-                  {i < sightings.length - 1 && <View style={styles.timelineConnector} />}
-                </View>
-                <View style={{ flex: 1, paddingBottom: 20 }}>
-                  {s.photoUri ? (
-                    <TouchableOpacity
-                      activeOpacity={0.88}
-                      onPress={() => setViewerIndex(sightingIndexMap.get(s.id) ?? null)}
-                    >
-                      <Image
-                        source={{ uri: s.photoUri }}
-                        style={styles.sightingPhoto}
-                        contentFit="cover" cachePolicy="memory-disk"
-                        recyclingKey={s.id} transition={150}
-                      />
-                    </TouchableOpacity>
-                  ) : null}
-                  <Text style={[t.bodyMed, { color: colors.textPrimary }]}>{fmtDate(s.timestamp)}</Text>
-                  <Text style={[t.caption, { color: colors.textSecondary, marginTop: 2 }]}>{fmtTime(s.timestamp)}</Text>
-                  {!!s.note && (
-                    <Text style={[t.caption, { color: colors.textPrimary, marginTop: 6, lineHeight: 18 }]}>
-                      “{s.note}”
-                    </Text>
-                  )}
-                </View>
-              </View>
-            ))
+            <Animated.Text entering={FadeIn.duration(400)} style={styles.heroGlyph}>{pet.initial}</Animated.Text>
           )}
+
+          <Animated.View entering={FadeInDown.delay(120).springify().damping(18)} style={styles.heroMeta} pointerEvents="none">
+            <Text style={[t.label, { color: 'rgba(255,255,255,0.7)', marginBottom: 6 }]}>
+              community {pet.species}
+            </Text>
+            <Text style={[styles.heroName, { color: '#FFFFFF' }]}>{pet.name}</Text>
+            <Text style={[t.caption, { color: 'rgba(255,255,255,0.75)', marginTop: 4 }]}>
+              First spotted {fmtDate(pet.firstSeenAt)}
+            </Text>
+          </Animated.View>
         </View>
 
-        {/* Moderation. Hidden on your own pet — you can delete it instead. */}
-        {!ownsPet && (
-          <View style={styles.modRow}>
-            <TouchableOpacity onPress={() => handleReport('pet', pet.id, pet.species)} activeOpacity={0.6}>
-              <Text style={[t.caption, { color: colors.textMuted }]}>⚑  Report this {pet.species}</Text>
-            </TouchableOpacity>
-            {!!pet.createdBy && pet.createdBy !== uid && (
-              <TouchableOpacity onPress={handleBlock} activeOpacity={0.6}>
-                <Text style={[t.caption, { color: colors.textMuted }]}>Block contributor</Text>
-              </TouchableOpacity>
+        <View style={styles.sheet}>
+          {/* Stats */}
+          <Animated.View entering={staggerIn(0, 160)} style={styles.statsRow}>
+            <View style={styles.stat}>
+              <Text style={[t.count, { color: colors.accent }]}>{pet.sightingCount}</Text>
+              <Text style={[t.label, { color: colors.textMuted }]}>sightings</Text>
+            </View>
+            <View style={[styles.stat, styles.statBorder]}>
+              <Text style={[t.count, { color: colors.textPrimary }]}>{monthsKnown(pet.firstSeenAt)}</Text>
+              <Text style={[t.label, { color: colors.textMuted }]}>months known</Text>
+            </View>
+            <View style={styles.stat}>
+              <Text style={[t.body, { color: colors.violet, fontFamily: fonts.bodyMedium }]}>
+                {timeAgo(pet.lastSeenAt)}
+              </Text>
+              <Text style={[t.label, { color: colors.textMuted }]}>last sighting</Text>
+            </View>
+          </Animated.View>
+
+          {/* Nobody has logged this pet in a while. Phrased as a gap in reporting,
+              and paired with the action that closes it — the CTA below. */}
+          {!!staleLabel && (
+            <Animated.View entering={staggerIn(1, 160)} style={styles.staleStrip}>
+              <Text style={[t.bodyMed, { color: colors.textPrimary }]}>
+                👀  {staleLabel}
+              </Text>
+              <Text style={[t.caption, { color: colors.textSecondary, marginTop: 4 }]}>
+                If you spot {pet.name}, logging it keeps the map honest.
+              </Text>
+            </Animated.View>
+          )}
+
+          {/* Walk-there row. Sits directly under the stats because "last seen 2h ago"
+              is the line that makes someone want to go and look. */}
+          <Animated.View entering={staggerIn(2, 160)}>
+            <PressableScale style={styles.directionsRow} onPress={handleDirections} scaleTo={0.98}>
+              <Text style={[t.bodyMed, { color: colors.textPrimary, flexShrink: 1 }]} numberOfLines={1}>
+                📍  {placeName ? `Last seen near ${placeName}` : 'Last seen here'}
+              </Text>
+              <Text style={[t.caption, { color: colors.accent, fontFamily: fonts.bodyMedium }]}>Directions  ›</Text>
+            </PressableScale>
+          </Animated.View>
+
+          {pet.status === 'adoptable' && (
+            <Animated.View entering={staggerIn(3, 160)} style={styles.adoptBanner}>
+              <Text style={[t.bodyMed, { color: colors.violet }]}>♥  Looking for a home</Text>
+              <Text style={[t.caption, { color: colors.textSecondary, marginTop: 6 }]}>
+                {pet.name} is ready to be adopted. Reach out to the caretaker to learn more.
+              </Text>
+              {!!pet.adoptionContact?.trim() && (
+                <PressableScale style={styles.adoptBtn} onPress={handleAdoptInterest} haptic>
+                  <Text style={[t.bodyMed, { color: '#FFFFFF' }]}>I'm interested</Text>
+                </PressableScale>
+              )}
+            </Animated.View>
+          )}
+
+          {pet.status === 'adopted' && (
+            <Animated.View entering={staggerIn(3, 160)} style={styles.adoptedStrip}>
+              <Text style={[t.bodyMed, { color: colors.textPrimary }]}>🎉  {pet.name} found a home!</Text>
+            </Animated.View>
+          )}
+
+          {editing && (
+            <Animated.View entering={FadeInDown.springify().damping(18)} style={styles.section}>
+              <Text style={[t.label, { color: colors.textMuted, marginBottom: 8 }]}>Name</Text>
+              <TextInput
+                style={styles.editInput}
+                value={editName}
+                onChangeText={setEditName}
+                placeholder="e.g. Miso"
+                placeholderTextColor={colors.textMuted}
+                maxLength={60}
+              />
+              <Text style={[t.label, { color: colors.textMuted, marginTop: 16, marginBottom: 8 }]}>Description</Text>
+              <TextInput
+                style={[styles.editInput, { minHeight: 88, textAlignVertical: 'top' }]}
+                value={editDesc}
+                onChangeText={setEditDesc}
+                placeholder="Markings, temperament, where they usually sit…"
+                placeholderTextColor={colors.textMuted}
+                maxLength={500}
+                multiline
+              />
+              <View style={[styles.ctaRow, { marginTop: 14 }]}>
+                <PressableScale
+                  style={styles.ctaBtnOutline}
+                  onPress={() => setEditing(false)}
+                  disabled={savingEdit}
+                >
+                  <Text style={[t.bodyMed, { color: colors.textPrimary }]}>Cancel</Text>
+                </PressableScale>
+                <PressableScale
+                  style={[styles.adoptBtn, { flex: 1, marginTop: 0, opacity: savingEdit ? 0.5 : 1 }]}
+                  onPress={saveEdit}
+                  disabled={savingEdit}
+                >
+                  {savingEdit
+                    ? <ActivityIndicator color="#FFFFFF" />
+                    : <Text style={[t.bodyMed, { color: '#FFFFFF' }]}>Save</Text>}
+                </PressableScale>
+              </View>
+            </Animated.View>
+          )}
+
+          {!editing && pet.description && (
+            <Animated.View entering={FadeIn.delay(200).duration(260)} style={styles.section}>
+              <Text style={[t.body, { color: colors.textSecondary, lineHeight: 24 }]}>{pet.description}</Text>
+            </Animated.View>
+          )}
+
+          {/* Sightings timeline */}
+          <View style={styles.section}>
+            <Text style={[t.label, { color: colors.textMuted, marginBottom: 16 }]}>Recent sightings</Text>
+            {sightings.length === 0 ? (
+              <Text style={[t.body, { color: colors.textMuted }]}>No sightings logged yet.</Text>
+            ) : (
+              sightings.map((s, i) => (
+                <Animated.View key={s.id} entering={staggerIn(i, 240)} style={styles.timelineRow}>
+                  <View style={styles.timelineLine}>
+                    <View style={[styles.timelineDot, { backgroundColor: i === 0 ? colors.accent : colors.border }]} />
+                    {i < sightings.length - 1 && <View style={styles.timelineConnector} />}
+                  </View>
+                  <View style={{ flex: 1, paddingBottom: 20 }}>
+                    {s.photoUri ? (
+                      <TouchableOpacity
+                        activeOpacity={0.88}
+                        onPress={() => setViewerIndex(sightingIndexMap.get(s.id) ?? null)}
+                      >
+                        <Image
+                          source={{ uri: s.photoUri }}
+                          style={styles.sightingPhoto}
+                          contentFit="cover" cachePolicy="memory-disk"
+                          recyclingKey={s.id} transition={200}
+                        />
+                      </TouchableOpacity>
+                    ) : null}
+                    <Text style={[t.bodyMed, { color: colors.textPrimary }]}>{fmtDate(s.timestamp)}</Text>
+                    <Text style={[t.caption, { color: colors.textSecondary, marginTop: 2 }]}>{fmtTime(s.timestamp)}</Text>
+                    {!!s.note && (
+                      <Text style={[t.caption, { color: colors.textPrimary, marginTop: 6, lineHeight: 18 }]}>
+                        “{s.note}”
+                      </Text>
+                    )}
+                  </View>
+                </Animated.View>
+              ))
             )}
           </View>
-        )}
 
-        <View style={{ height: 100 }} />
-      </ScrollView>
+          {/* Moderation. Hidden on your own pet — you can delete it instead. */}
+          {!ownsPet && (
+            <View style={styles.modRow}>
+              <TouchableOpacity onPress={() => handleReport('pet', pet.id, pet.species)} activeOpacity={0.6}>
+                <Text style={[t.caption, { color: colors.textMuted }]}>⚑  Report this {pet.species}</Text>
+              </TouchableOpacity>
+              {!!pet.createdBy && pet.createdBy !== uid && (
+                <TouchableOpacity onPress={handleBlock} activeOpacity={0.6}>
+                  <Text style={[t.caption, { color: colors.textMuted }]}>Block contributor</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
+
+          <View style={{ height: 100 }} />
+        </View>
+      </Animated.ScrollView>
 
       {/* Sticky CTA */}
-      <View style={[styles.cta, { paddingBottom: insets.bottom + 12 }]}>
+      <Animated.View
+        entering={FadeInDown.delay(200).springify().damping(20)}
+        style={[styles.cta, { paddingBottom: insets.bottom + 12 }]}
+      >
         <View style={styles.ctaRow}>
-          <TouchableOpacity style={styles.ctaBtnOutline} onPress={handleAddPhoto} activeOpacity={0.8}>
+          <PressableScale style={styles.ctaBtnOutline} onPress={handleAddPhoto}>
             <Text style={[t.bodyMed, { color: colors.textPrimary }]}>📷  Add photo</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
+          </PressableScale>
+          <PressableScale
             style={[styles.ctaBtn, saving && { opacity: 0.7 }]}
             onPress={handleLogSighting}
             disabled={saving}
-            activeOpacity={0.85}
+            haptic
           >
             {saving
-              ? <ActivityIndicator color={colors.onAmber} />
-              : <Text style={[t.bodyMed, { color: colors.onAmber }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>
-                  I see {pet.name}
-                </Text>}
-          </TouchableOpacity>
+              ? <ActivityIndicator color={colors.onAccent} />
+              : justLogged
+                ? (
+                  <View style={styles.loggedRow}>
+                    <SuccessStamp size={20} color={colors.onAccent} checkColor={colors.accent} />
+                    <Text style={[t.bodyMed, { color: colors.onAccent }]}>Logged</Text>
+                  </View>
+                )
+                : <Text style={[t.bodyMed, { color: colors.onAccent }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>
+                    I see {pet.name}
+                  </Text>}
+          </PressableScale>
         </View>
-      </View>
+      </Animated.View>
 
       <ImageViewing
         images={allPhotos}

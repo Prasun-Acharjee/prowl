@@ -1,6 +1,6 @@
 import React from 'react';
 import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
-import { createStackNavigator } from '@react-navigation/stack';
+import { createStackNavigator, TransitionPresets } from '@react-navigation/stack';
 import { useTheme } from '../context/ThemeContext';
 import { MapScreen } from '../screens/MapScreen';
 import { CameraScreen } from '../screens/CameraScreen';
@@ -34,7 +34,16 @@ export function RootNavigator() {
 
   return (
     <NavigationContainer theme={navTheme}>
-      <Stack.Navigator screenOptions={{ headerShown: false, cardStyle: { backgroundColor: colors.bg } }}>
+      {/* The iOS slide on both platforms: Android's default fade-up reads as a
+          different app from the springy sheets inside each screen. The preset
+          sets no gestureEnabled, so swipe-back is unchanged per platform. */}
+      <Stack.Navigator
+        screenOptions={{
+          headerShown: false,
+          cardStyle: { backgroundColor: colors.bg },
+          ...TransitionPresets.SlideFromRightIOS,
+        }}
+      >
         <Stack.Screen name="Map"    component={MapScreen} />
         <Stack.Screen name="Camera" component={CameraScreen} options={{ gestureEnabled: true, animationEnabled: true }} />
         <Stack.Screen name="PetDetail"   component={PetDetailScreen} />
